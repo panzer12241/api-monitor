@@ -1,0 +1,32 @@
+groups:
+  - name: api-monitor-alerts
+    rules:
+      - alert: APIEndpointDown
+        expr: api_endpoint_status == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: "{{ $labels.endpoint_name }}"
+        annotations:
+          summary: "API Endpoint {{ $labels.endpoint_name }} is down"
+          description: "The API endpoint {{ $labels.endpoint_name }} has been down for more than 1 minute."
+          
+      - alert: HighResponseTime
+        expr: api_response_time_seconds > 2
+        for: 2m
+        labels:
+          severity: warning
+          service: "{{ $labels.endpoint_name }}"
+        annotations:
+          summary: "High response time for {{ $labels.endpoint_name }}"
+          description: "Response time for {{ $labels.endpoint_name }} is {{ $value }}s, which is above the 2s threshold."
+          
+      - alert: LowSuccessRate
+        expr: (rate(api_checks_total[5m]) * 100) < 90
+        for: 5m
+        labels:
+          severity: warning
+          service: "{{ $labels.endpoint_name }}"
+        annotations:
+          summary: "Low success rate for {{ $labels.endpoint_name }}"
+          description: "Success rate for {{ $labels.endpoint_name }} is {{ $value }}%, which is below 90%."
