@@ -436,13 +436,21 @@ func (m *Monitor) deleteEndpoint(c *gin.Context) {
 
 	m.unscheduleEndpoint(endpointID)
 
-	_, err = m.db.Exec("DELETE FROM api_endpoints WHERE id = $1", endpointID)
+	// Delete endpoint logs first (foreign key constraint)
+	_, err = m.db.Exec("DELETE FROM api_check_logs WHERE endpoint_id = $1", endpointID)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		c.JSON(500, gin.H{"error": "Failed to delete endpoint logs: " + err.Error()})
 		return
 	}
 
-	c.JSON(200, gin.H{"message": "Endpoint deleted successfully"})
+	// Delete endpoint
+	_, err = m.db.Exec("DELETE FROM api_endpoints WHERE id = $1", endpointID)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to delete endpoint: " + err.Error()})
+		return
+	}
+
+	c.JSON(200, gin.H{"message": "Endpoint and all related logs deleted successfully"})
 }
 
 func (m *Monitor) toggleEndpoint(c *gin.Context) {
