@@ -16,8 +16,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/robfig/cron/v3"
 )
 
@@ -61,12 +59,10 @@ type Proxy struct {
 }
 
 type Monitor struct {
-	db              *sql.DB
-	cron            *cron.Cron
-	activeJobs      map[int]cron.EntryID
-	jobMutex        sync.RWMutex
-	prometheusGauge *prometheus.GaugeVec
-	responseTime    *prometheus.HistogramVec
+	db         *sql.DB
+	cron       *cron.Cron
+	activeJobs map[int]cron.EntryID
+	jobMutex   sync.RWMutex
 }
 
 func main() {
@@ -77,34 +73,11 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize Prometheus metrics
-	prometheusGauge := prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "api_endpoint_status",
-			Help: "Status of API endpoints (1 = up, 0 = down)",
-		},
-		[]string{"endpoint_id", "endpoint_name", "url", "method"},
-	)
-
-	responseTime := prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name:    "api_endpoint_response_time_seconds",
-			Help:    "Response time of API endpoints in seconds",
-			Buckets: prometheus.DefBuckets,
-		},
-		[]string{"endpoint_id", "endpoint_name", "url", "method"},
-	)
-
-	prometheus.MustRegister(prometheusGauge)
-	prometheus.MustRegister(responseTime)
-
 	// Initialize monitor
 	monitor := &Monitor{
-		db:              db,
-		cron:            cron.New(),
-		activeJobs:      make(map[int]cron.EntryID),
-		prometheusGauge: prometheusGauge,
-		responseTime:    responseTime,
+		db:         db,
+		cron:       cron.New(),
+		activeJobs: make(map[int]cron.EntryID),
 	}
 
 	// Start cron scheduler
@@ -137,9 +110,6 @@ func main() {
 
 		c.Next()
 	})
-
-	// Prometheus metrics endpoint
-	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// Authentication endpoint (no auth required)
 	r.POST("/api/v1/auth/login", monitor.login)
@@ -320,7 +290,6 @@ func (m *Monitor) checkEndpoint(endpoint APIEndpoint) {
 
 	if err != nil {
 		m.logCheck(endpoint.ID, 0, 0, "", "", fmt.Sprintf("Error creating request: %v", err))
-		m.updatePrometheusMetrics(endpoint, 0, 0)
 		return
 	}
 
@@ -335,7 +304,6 @@ func (m *Monitor) checkEndpoint(endpoint APIEndpoint) {
 
 	if err != nil {
 		m.logCheck(endpoint.ID, 0, durationMs, "", "", fmt.Sprintf("Request failed: %v", err))
-		m.updatePrometheusMetrics(endpoint, 0, duration.Seconds())
 		return
 	}
 	defer resp.Body.Close()
@@ -364,43 +332,7 @@ func (m *Monitor) checkEndpoint(endpoint APIEndpoint) {
 
 	m.logCheck(endpoint.ID, resp.StatusCode, durationMs, bodyStr, headersStr, "")
 
-	// Update Prometheus metrics
-	status := 0.0
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		status = 1.0
-	}
-	m.updatePrometheusMetrics(endpoint, status, duration.Seconds())
-
 	log.Printf("Checked %s: %d (%dms)", endpoint.Name, resp.StatusCode, durationMs)
-}
-
-func (m *Monitor) updatePrometheusMetrics(endpoint APIEndpoint, status float64, responseTime float64) {
-	labels := prometheus.Labels{
-		"endpoint_id":   strconv.Itoa(endpoint.ID),
-		"endpoint_name": endpoint.Name,
-		"url":           endpoint.URL,
-		"method":        endpoint.Method,
-	}
-
-	m.prometheusGauge.With(labels).Set(status)
-	m.responseTime.With(labels).Observe(responseTime)
-}
-
-func (m *Monitor) deletePrometheusMetrics(endpoint APIEndpoint) {
-	labels := prometheus.Labels{
-		"endpoint_id":   strconv.Itoa(endpoint.ID),
-		"endpoint_name": endpoint.Name,
-		"url":           endpoint.URL,
-		"method":        endpoint.Method,
-	}
-
-	// Set status to 0 (down) and delete the metric
-	m.prometheusGauge.With(labels).Set(0)
-	m.prometheusGauge.Delete(labels)
-
-	// Note: Histogram metrics cannot be completely deleted in Prometheus
-	// but they will stop being updated and eventually be cleaned up by Prometheus
-	m.responseTime.Delete(labels)
 }
 
 func (m *Monitor) logCheck(endpointID, statusCode, responseTimeMs int, responseBody, responseHeaders, errorMessage string) {
@@ -651,9 +583,6 @@ func (m *Monitor) deleteEndpoint(c *gin.Context) {
 	}
 
 	m.unscheduleEndpoint(endpointID)
-
-	// Delete Prometheus metrics for this endpoint
-	m.deletePrometheusMetrics(endpoint)
 
 	// Delete endpoint logs first (foreign key constraint)
 	_, err = m.db.Exec("DELETE FROM api_check_logs WHERE endpoint_id = $1", endpointID)
