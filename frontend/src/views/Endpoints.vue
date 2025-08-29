@@ -76,14 +76,6 @@
         <v-card-text>
           <v-form ref="endpointForm" v-model="valid">
             <v-text-field
-              v-model="endpointForm.name"
-              label="Name"
-              :rules="nameRules"
-              required
-              outlined
-            ></v-text-field>
-            
-            <v-text-field
               v-model="endpointForm.url"
               label="URL"
               :rules="urlRules"
@@ -91,13 +83,6 @@
               outlined
               placeholder="https://api.example.com/health"
             ></v-text-field>
-            
-            <v-select
-              v-model="endpointForm.method"
-              :items="httpMethods"
-              label="Method"
-              outlined
-            ></v-select>
             
             <v-row>
               <v-col cols="6">
@@ -122,59 +107,6 @@
                 ></v-text-field>
               </v-col>
             </v-row>
-            
-            <!-- Headers Section -->
-            <v-card outlined class="mb-4">
-              <v-card-subtitle>
-                <v-icon left small>mdi-code-tags</v-icon>
-                HTTP Headers
-              </v-card-subtitle>
-              
-              <v-card-text>
-                <div v-for="(header, index) in headers" :key="index" class="mb-2">
-                  <v-row>
-                    <v-col cols="5">
-                      <v-text-field
-                        v-model="header.key"
-                        label="Header name"
-                        outlined
-                        dense
-                      ></v-text-field>
-                    </v-col>
-                    <v-col cols="5">
-                      <v-text-field
-                        v-model="header.value"
-                        label="Header value"
-                        outlined
-                        dense
-                      ></v-text-field>
-                    </v-col>
-                    <v-col cols="2">
-                      <v-btn
-                        color="error"
-                        icon
-                        @click="removeHeader(index)"
-                      >
-                        <v-icon>mdi-delete</v-icon>
-                      </v-btn>
-                    </v-col>
-                  </v-row>
-                </div>
-                
-                <v-btn color="primary" outlined @click="addHeader">
-                  <v-icon left>mdi-plus</v-icon>
-                  Add Header
-                </v-btn>
-              </v-card-text>
-            </v-card>
-            
-            <v-textarea
-              v-model="endpointForm.body"
-              label="Request Body"
-              outlined
-              rows="4"
-              placeholder="JSON request body (for POST/PUT requests)"
-            ></v-textarea>
             
             <v-switch
               v-model="endpointForm.is_active"
@@ -278,14 +210,6 @@ export default {
         is_active: true
       },
       
-      headers: [],
-      httpMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD'],
-      
-      nameRules: [
-        v => !!v || 'Name is required',
-        v => v.length >= 3 || 'Name must be at least 3 characters'
-      ],
-      
       urlRules: [
         v => !!v || 'URL is required',
         v => {
@@ -299,9 +223,7 @@ export default {
       ],
       
       tableHeaders: [
-        { title: 'Name', key: 'name', sortable: true },
         { title: 'URL', key: 'url', sortable: false },
-        { title: 'Method', key: 'method', sortable: true },
         { title: 'Status', key: 'status', sortable: false },
         { title: 'Interval', key: 'check_interval_seconds', sortable: true },
         { title: 'Timeout', key: 'timeout_seconds', sortable: true },
@@ -342,7 +264,6 @@ export default {
     
     editEndpoint(endpoint) {
       this.endpointForm = { ...endpoint }
-      this.headers = Object.entries(endpoint.headers || {}).map(([key, value]) => ({ key, value }))
       this.isEditMode = true
       this.dialog = true
     },
@@ -352,20 +273,21 @@ export default {
       
       this.saving = true
       
-      // Convert headers array to object
-      this.endpointForm.headers = {}
-      this.headers.forEach(header => {
-        if (header.key && header.value) {
-          this.endpointForm.headers[header.key] = header.value
-        }
-      })
+      // Set default values for simplified form
+      const payload = {
+        ...this.endpointForm,
+        name: this.endpointForm.url, // Auto-generate name from URL
+        method: 'GET', // Default to GET
+        headers: {}, // Empty headers
+        body: '' // Empty body
+      }
       
       try {
         if (this.isEditMode) {
-          await axios.put(`${API_BASE}/endpoints/${this.endpointForm.id}`, this.endpointForm)
+          await axios.put(`${API_BASE}/endpoints/${this.endpointForm.id}`, payload)
           this.showSnackbar('Endpoint updated successfully', 'success')
         } else {
-          await axios.post(`${API_BASE}/endpoints`, this.endpointForm)
+          await axios.post(`${API_BASE}/endpoints`, payload)
           this.showSnackbar('Endpoint created successfully', 'success')
         }
         
@@ -424,15 +346,6 @@ export default {
         check_interval_seconds: 60,
         is_active: true
       }
-      this.headers = []
-    },
-    
-    addHeader() {
-      this.headers.push({ key: '', value: '' })
-    },
-    
-    removeHeader(index) {
-      this.headers.splice(index, 1)
     },
     
     showSnackbar(text, color = 'success') {
