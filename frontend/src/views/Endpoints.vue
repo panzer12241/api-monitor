@@ -234,36 +234,37 @@
               
               <v-expansion-panel-text>
                 <v-row>
-                  <v-col cols="12" md="6">
+                  
+                <v-col cols="12" md="6">
                     <h4 class="mb-3">Response Headers</h4>
                     <v-sheet 
-                      v-if="log.response_headers && log.response_headers.trim()" 
-                      color="grey-lighten-4"
-                      class="pa-3 rounded"
-                      style="max-height: 400px; overflow-y: auto;"
+                        v-if="log.response_headers && log.response_headers.trim()" 
+                        color="blue-grey-lighten-5"
+                        class="pa-3 rounded"
+                        style="max-height: 400px; overflow-y: auto;"
                     >
-                      <div 
+                        <div 
                         v-for="(value, key) in parseHeaders(log.response_headers)" 
                         :key="key"
-                        class="text-body-2 mb-1"
+                        class="text-body-2 mb-1 font-weight-medium"
                         style="font-family: 'Courier New', monospace; line-height: 1.5;"
-                      >
-                        <span class="font-weight-bold text-blue">{{ key }}:</span> 
-                        <span class="text-grey-darken-3">{{ value }}</span>
-                      </div>
+                        >
+                        <span class="font-weight-bold text-indigo-darken-2">{{ key }}:</span> 
+                        <span class="text-grey-darken-4 font-weight-medium">{{ value }}</span>
+                        </div>
                     </v-sheet>
                     <v-alert v-else type="info" variant="outlined">No headers available</v-alert>
-                  </v-col>
+                </v-col>
                   
                   <v-col cols="12" md="6">
                     <h4 class="mb-3">Response Body</h4>
                     <v-sheet 
                       v-if="log.response_body && log.response_body.trim()" 
-                      color="black"
+                      color="grey-darken-4"
                       class="pa-3 rounded"
                       style="max-height: 400px; overflow-y: auto;"
                     >
-                      <pre class="text-white text-body-2" style="font-family: 'Courier New', monospace; white-space: pre-wrap; word-break: break-word; line-height: 1.5; margin: 0;">{{ formatResponseBody(log.response_body) }}</pre>
+                      <pre class="text-green-lighten-2 text-body-2 font-weight-medium" style="font-family: 'Courier New', monospace; white-space: pre-wrap; word-break: break-word; line-height: 1.5; margin: 0;">{{ formatResponseBody(log.response_body) }}</pre>
                     </v-sheet>
                     <v-alert v-else type="info" variant="outlined">No response body</v-alert>
                   </v-col>
