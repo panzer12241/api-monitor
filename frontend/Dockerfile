@@ -6,7 +6,15 @@ COPY package.json bun.lockb* ./
 RUN bun install --frozen-lockfile
 
 COPY . .
+RUN bun run build
 
-EXPOSE 3000
+# Use nginx to serve the built files
+FROM nginx:alpine
+COPY --from=0 /app/dist /usr/share/nginx/html
 
-CMD ["bun", "run", "dev", "--host", "0.0.0.0"]
+# Copy nginx config
+COPY nginx.conf /etc/nginx/nginx.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

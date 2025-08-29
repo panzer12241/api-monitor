@@ -41,6 +41,16 @@
             <template v-slot:item.actions="{ item }">
               <v-btn
                 size="small"
+                color="info"
+                @click="viewLogs(item)"
+                class="mr-2"
+              >
+                <v-icon left small>mdi-history</v-icon>
+                Logs
+              </v-btn>
+              
+              <v-btn
+                size="small"
                 color="primary"
                 @click="editEndpoint(item)"
                 class="mr-2"
@@ -172,6 +182,117 @@
         </v-btn>
       </template>
     </v-snackbar>
+
+    <!-- Logs Dialog -->
+    <v-dialog v-model="logsDialog" max-width="1200px">
+      <v-card>
+        <v-card-title>
+          <v-icon left>mdi-history</v-icon>
+          Endpoint Logs: {{ selectedEndpoint?.name || selectedEndpoint?.url }}
+          <v-spacer></v-spacer>
+          <v-btn 
+            color="primary" 
+            @click="fetchLogs" 
+            :loading="logsLoading"
+            size="small"
+          >
+            <v-icon left>mdi-refresh</v-icon>
+            Refresh
+          </v-btn>
+        </v-card-title>
+        
+        <v-card-text style="max-height: 600px; overflow-y: auto;">
+          <v-progress-linear v-if="logsLoading" indeterminate></v-progress-linear>
+          
+          <v-expansion-panels v-if="logs.length > 0" multiple>
+            <v-expansion-panel v-for="log in logs" :key="log.id">
+              <v-expansion-panel-title>
+                <div class="d-flex align-center">
+                  <v-chip 
+                    :color="log.status_code >= 200 && log.status_code < 300 ? 'success' : 'error'"
+                    size="small"
+                    class="mr-3"
+                  >
+                    {{ log.status_code }}
+                  </v-chip>
+                  
+                  <span class="mr-3">{{ log.response_time_ms }}ms</span>
+                  
+                  <v-chip 
+                    variant="outlined" 
+                    size="small"
+                    class="mr-3"
+                  >
+                    {{ formatDate(log.checked_at) }}
+                  </v-chip>
+                  
+                  <span v-if="log.error_message" class="text-error">
+                    {{ log.error_message }}
+                  </span>
+                </div>
+              </v-expansion-panel-title>
+              
+              <v-expansion-panel-text>
+                <v-row>
+                  <v-col cols="12" md="6">
+                    <h4 class="mb-3">Response Headers</h4>
+                    <v-sheet 
+                      v-if="log.response_headers && log.response_headers.trim()" 
+                      color="grey-lighten-4"
+                      class="pa-3 rounded"
+                      style="max-height: 400px; overflow-y: auto;"
+                    >
+                      <div 
+                        v-for="(value, key) in parseHeaders(log.response_headers)" 
+                        :key="key"
+                        class="text-body-2 mb-1"
+                        style="font-family: 'Courier New', monospace; line-height: 1.5;"
+                      >
+                        <span class="font-weight-bold text-blue">{{ key }}:</span> 
+                        <span class="text-grey-darken-3">{{ value }}</span>
+                      </div>
+                    </v-sheet>
+                    <v-alert v-else type="info" variant="outlined">No headers available</v-alert>
+                  </v-col>
+                  
+                  <v-col cols="12" md="6">
+                    <h4 class="mb-3">Response Body</h4>
+                    <v-sheet 
+                      v-if="log.response_body && log.response_body.trim()" 
+                      color="black"
+                      class="pa-3 rounded"
+                      style="max-height: 400px; overflow-y: auto;"
+                    >
+                      <pre class="text-white text-body-2" style="font-family: 'Courier New', monospace; white-space: pre-wrap; word-break: break-word; line-height: 1.5; margin: 0;">{{ formatResponseBody(log.response_body) }}</pre>
+                    </v-sheet>
+                    <v-alert v-else type="info" variant="outlined">No response body</v-alert>
+                  </v-col>
+                </v-row>
+                
+                <!-- Debug info -->
+                <v-row class="mt-4">
+                  <v-col cols="12">
+                    <details>
+                      <summary>Debug Info</summary>
+                      <pre class="text-caption">{{ JSON.stringify(log, null, 2) }}</pre>
+                    </details>
+                  </v-col>
+                </v-row>
+              </v-expansion-panel-text>
+            </v-expansion-panel>
+          </v-expansion-panels>
+          
+          <v-alert v-else-if="!logsLoading" type="info">
+            No logs available for this endpoint
+          </v-alert>
+        </v-card-text>
+        
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn @click="logsDialog = false">Close</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-container>
 </template>
 
@@ -197,6 +318,12 @@ export default {
       snackbarText: '',
       snackbarColor: 'success',
       deletingEndpoint: null,
+      
+      // Logs related
+      logsDialog: false,
+      logs: [],
+      logsLoading: false,
+      selectedEndpoint: null,
       
       endpointForm: {
         id: null,
@@ -348,6 +475,53 @@ export default {
       }
     },
     
+    // Logs methods
+    viewLogs(endpoint) {
+      this.selectedEndpoint = endpoint
+      this.logsDialog = true
+      this.fetchLogs()
+    },
+    
+    async fetchLogs() {
+      if (!this.selectedEndpoint) return
+      
+      this.logsLoading = true
+      try {
+        const response = await axios.get(`${API_BASE}/endpoints/${this.selectedEndpoint.id}/logs?limit=20`)
+        this.logs = response.data || []
+      } catch (error) {
+        this.showSnackbar('Failed to fetch logs', 'error')
+        console.error(error)
+      } finally {
+        this.logsLoading = false
+      }
+    },
+    
+    parseHeaders(headersStr) {
+      try {
+        if (!headersStr || headersStr.trim() === '') return {}
+        return JSON.parse(headersStr)
+      } catch (e) {
+        console.error('Error parsing headers:', e, 'Headers string:', headersStr)
+        return {}
+      }
+    },
+    
+    formatResponseBody(body) {
+      try {
+        // Try to format as JSON if possible
+        const parsed = JSON.parse(body)
+        return JSON.stringify(parsed, null, 2)
+      } catch {
+        // Return as-is if not JSON
+        return body
+      }
+    },
+    
+    formatDate(dateStr) {
+      return new Date(dateStr).toLocaleString()
+    },
+    
     showSnackbar(text, color = 'success') {
       this.snackbarText = text
       this.snackbarColor = color
@@ -356,3 +530,10 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+/* Only keep essential overrides */
+.log-expansion-panel >>> .v-expansion-panel-text__wrapper {
+  padding: 16px;
+}
+</style>

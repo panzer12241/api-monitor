@@ -139,3 +139,4 @@ grafana_data/
 
 # PostgreSQL data
 postgres_data/
+frontend/dist

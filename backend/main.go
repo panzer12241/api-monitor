@@ -35,13 +35,14 @@ type APIEndpoint struct {
 }
 
 type APICheckLog struct {
-	ID             int       `json:"id"`
-	EndpointID     int       `json:"endpoint_id"`
-	StatusCode     int       `json:"status_code"`
-	ResponseTimeMs int       `json:"response_time_ms"`
-	ResponseBody   string    `json:"response_body"`
-	ErrorMessage   string    `json:"error_message"`
-	CheckedAt      time.Time `json:"checked_at"`
+	ID              int       `json:"id"`
+	EndpointID      int       `json:"endpoint_id"`
+	StatusCode      int       `json:"status_code"`
+	ResponseTimeMs  int       `json:"response_time_ms"`
+	ResponseBody    string    `json:"response_body"`
+	ResponseHeaders string    `json:"response_headers"`
+	ErrorMessage    string    `json:"error_message"`
+	CheckedAt       time.Time `json:"checked_at"`
 }
 
 type Monitor struct {
@@ -97,6 +98,14 @@ func main() {
 	// Load existing active endpoints
 	monitor.loadActiveEndpoints()
 
+	// Schedule daily cleanup of old logs (run at 2 AM)
+	monitor.cron.AddFunc("0 2 * * *", func() {
+		monitor.cleanupOldLogs()
+	})
+
+	// Run initial cleanup
+	go monitor.cleanupOldLogs()
+
 	// Setup Gin router
 	r := gin.Default()
 
@@ -130,6 +139,7 @@ func main() {
 		api.POST("/endpoints/:id/toggle", monitor.toggleEndpoint)
 		api.GET("/endpoints/:id/logs", monitor.getEndpointLogs)
 		api.POST("/endpoints/:id/check", monitor.manualCheck)
+		api.POST("/cleanup-logs", monitor.manualCleanup)
 	}
 
 	log.Println("API Monitor started on :8080")
@@ -240,7 +250,7 @@ func (m *Monitor) checkEndpoint(endpoint APIEndpoint) {
 	}
 
 	if err != nil {
-		m.logCheck(endpoint.ID, 0, 0, "", fmt.Sprintf("Error creating request: %v", err))
+		m.logCheck(endpoint.ID, 0, 0, "", "", fmt.Sprintf("Error creating request: %v", err))
 		m.updatePrometheusMetrics(endpoint, 0, 0)
 		return
 	}
@@ -255,7 +265,7 @@ func (m *Monitor) checkEndpoint(endpoint APIEndpoint) {
 	durationMs := int(duration.Milliseconds())
 
 	if err != nil {
-		m.logCheck(endpoint.ID, 0, durationMs, "", fmt.Sprintf("Request failed: %v", err))
+		m.logCheck(endpoint.ID, 0, durationMs, "", "", fmt.Sprintf("Request failed: %v", err))
 		m.updatePrometheusMetrics(endpoint, 0, duration.Seconds())
 		return
 	}
@@ -264,12 +274,26 @@ func (m *Monitor) checkEndpoint(endpoint APIEndpoint) {
 	body, _ := io.ReadAll(resp.Body)
 	bodyStr := string(body)
 
+	// Collect response headers
+	headersStr := ""
+	if resp.Header != nil {
+		headers := make(map[string]string)
+		for key, values := range resp.Header {
+			if len(values) > 0 {
+				headers[key] = values[0] // Take first value if multiple
+			}
+		}
+		if headersBytes, err := json.Marshal(headers); err == nil {
+			headersStr = string(headersBytes)
+		}
+	}
+
 	// Truncate response body if too long
 	if len(bodyStr) > 1000 {
 		bodyStr = bodyStr[:1000] + "... (truncated)"
 	}
 
-	m.logCheck(endpoint.ID, resp.StatusCode, durationMs, bodyStr, "")
+	m.logCheck(endpoint.ID, resp.StatusCode, durationMs, bodyStr, headersStr, "")
 
 	// Update Prometheus metrics
 	status := 0.0
@@ -310,9 +334,10 @@ func (m *Monitor) deletePrometheusMetrics(endpoint APIEndpoint) {
 	m.responseTime.Delete(labels)
 }
 
-func (m *Monitor) logCheck(endpointID, statusCode, responseTimeMs int, responseBody, errorMessage string) {
+func (m *Monitor) logCheck(endpointID, statusCode, responseTimeMs int, responseBody, responseHeaders, errorMessage string) {
 	// Clean strings to ensure UTF-8 compatibility
 	cleanResponseBody := strings.ToValidUTF8(responseBody, "")
+	cleanResponseHeaders := strings.ToValidUTF8(responseHeaders, "")
 	cleanErrorMessage := strings.ToValidUTF8(errorMessage, "")
 
 	// Limit response body size to prevent database issues
@@ -320,17 +345,39 @@ func (m *Monitor) logCheck(endpointID, statusCode, responseTimeMs int, responseB
 		cleanResponseBody = cleanResponseBody[:1000] + "..."
 	}
 
+	// Limit response headers size
+	if len(cleanResponseHeaders) > 2000 {
+		cleanResponseHeaders = cleanResponseHeaders[:2000] + "..."
+	}
+
 	_, err := m.db.Exec(`
-		INSERT INTO api_check_logs (endpoint_id, status_code, response_time_ms, response_body, error_message)
-		VALUES ($1, $2, $3, $4, $5)`,
-		endpointID, statusCode, responseTimeMs, cleanResponseBody, cleanErrorMessage)
+		INSERT INTO api_check_logs (endpoint_id, status_code, response_time_ms, response_body, response_headers, error_message)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		endpointID, statusCode, responseTimeMs, cleanResponseBody, cleanResponseHeaders, cleanErrorMessage)
 
 	if err != nil {
 		log.Printf("Error logging check: %v", err)
 	}
 }
 
-// REST API Handlers
+func (m *Monitor) cleanupOldLogs() {
+	// Delete logs older than 30 days
+	result, err := m.db.Exec(`
+		DELETE FROM api_check_logs 
+		WHERE checked_at < NOW() - INTERVAL '30 days'`)
+
+	if err != nil {
+		log.Printf("Error cleaning up old logs: %v", err)
+	} else {
+		rowsAffected, _ := result.RowsAffected()
+		log.Printf("Cleaned up %d logs older than 30 days", rowsAffected)
+	}
+}
+
+func (m *Monitor) manualCleanup(c *gin.Context) {
+	m.cleanupOldLogs()
+	c.JSON(200, gin.H{"message": "Log cleanup completed"})
+} // REST API Handlers
 
 func (m *Monitor) getEndpoints(c *gin.Context) {
 	rows, err := m.db.Query(`
@@ -527,7 +574,7 @@ func (m *Monitor) getEndpointLogs(c *gin.Context) {
 	limit := c.DefaultQuery("limit", "100")
 
 	rows, err := m.db.Query(`
-		SELECT id, endpoint_id, status_code, response_time_ms, response_body, error_message, checked_at
+		SELECT id, endpoint_id, status_code, response_time_ms, response_body, COALESCE(response_headers, ''), error_message, checked_at
 		FROM api_check_logs 
 		WHERE endpoint_id = $1 
 		ORDER BY checked_at DESC 
@@ -543,7 +590,7 @@ func (m *Monitor) getEndpointLogs(c *gin.Context) {
 	for rows.Next() {
 		var log APICheckLog
 		err := rows.Scan(&log.ID, &log.EndpointID, &log.StatusCode, &log.ResponseTimeMs,
-			&log.ResponseBody, &log.ErrorMessage, &log.CheckedAt)
+			&log.ResponseBody, &log.ResponseHeaders, &log.ErrorMessage, &log.CheckedAt)
 		if err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
