@@ -163,7 +163,7 @@ func getEnv(key, fallback string) string {
 }
 
 func (m *Monitor) loadActiveEndpoints() {
-	rows, err := m.db.Query("SELECT id, name, url, method, headers, body, timeout_seconds, check_interval_seconds FROM api_endpoints WHERE is_active = true")
+	rows, err := m.db.Query("SELECT id, name, url, method, COALESCE(headers, '{}'), COALESCE(body, ''), timeout_seconds, check_interval_seconds FROM api_endpoints WHERE is_active = true")
 	if err != nil {
 		log.Printf("Error loading active endpoints: %v", err)
 		return
@@ -305,7 +305,7 @@ func (m *Monitor) logCheck(endpointID, statusCode, responseTimeMs int, responseB
 
 func (m *Monitor) getEndpoints(c *gin.Context) {
 	rows, err := m.db.Query(`
-		SELECT id, name, url, method, headers, body, timeout_seconds, check_interval_seconds, is_active, created_at, updated_at
+		SELECT id, name, url, method, COALESCE(headers, '{}'), COALESCE(body, ''), timeout_seconds, check_interval_seconds, is_active, created_at, updated_at
 		FROM api_endpoints ORDER BY created_at DESC`)
 
 	if err != nil {
@@ -452,7 +452,7 @@ func (m *Monitor) toggleEndpoint(c *gin.Context) {
 		// Load endpoint and schedule
 		var endpoint APIEndpoint
 		var headersJSON string
-		err = m.db.QueryRow("SELECT id, name, url, method, headers, body, timeout_seconds, check_interval_seconds FROM api_endpoints WHERE id = $1", endpointID).
+		err = m.db.QueryRow("SELECT id, name, url, method, COALESCE(headers, '{}'), COALESCE(body, ''), timeout_seconds, check_interval_seconds FROM api_endpoints WHERE id = $1", endpointID).
 			Scan(&endpoint.ID, &endpoint.Name, &endpoint.URL, &endpoint.Method, &headersJSON, &endpoint.Body, &endpoint.TimeoutSeconds, &endpoint.CheckIntervalSeconds)
 		if err == nil {
 			json.Unmarshal([]byte(headersJSON), &endpoint.Headers)
@@ -515,7 +515,7 @@ func (m *Monitor) manualCheck(c *gin.Context) {
 	var endpoint APIEndpoint
 	var headersJSON string
 	err = m.db.QueryRow(`
-		SELECT id, name, url, method, headers, body, timeout_seconds, check_interval_seconds
+		SELECT id, name, url, method, COALESCE(headers, '{}'), COALESCE(body, ''), timeout_seconds, check_interval_seconds
 		FROM api_endpoints WHERE id = $1`, endpointID).
 		Scan(&endpoint.ID, &endpoint.Name, &endpoint.URL, &endpoint.Method,
 			&headersJSON, &endpoint.Body, &endpoint.TimeoutSeconds, &endpoint.CheckIntervalSeconds)
