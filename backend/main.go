@@ -294,10 +294,19 @@ func (m *Monitor) updatePrometheusMetrics(endpoint APIEndpoint, status float64, 
 }
 
 func (m *Monitor) logCheck(endpointID, statusCode, responseTimeMs int, responseBody, errorMessage string) {
+	// Clean strings to ensure UTF-8 compatibility
+	cleanResponseBody := strings.ToValidUTF8(responseBody, "")
+	cleanErrorMessage := strings.ToValidUTF8(errorMessage, "")
+
+	// Limit response body size to prevent database issues
+	if len(cleanResponseBody) > 1000 {
+		cleanResponseBody = cleanResponseBody[:1000] + "..."
+	}
+
 	_, err := m.db.Exec(`
 		INSERT INTO api_check_logs (endpoint_id, status_code, response_time_ms, response_body, error_message)
 		VALUES ($1, $2, $3, $4, $5)`,
-		endpointID, statusCode, responseTimeMs, responseBody, errorMessage)
+		endpointID, statusCode, responseTimeMs, cleanResponseBody, cleanErrorMessage)
 
 	if err != nil {
 		log.Printf("Error logging check: %v", err)
