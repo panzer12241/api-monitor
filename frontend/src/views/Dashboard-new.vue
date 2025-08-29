@@ -1,6 +1,66 @@
 <template>
   <v-container fluid>
+    <!-- Stats Cards -->
     <v-row>
+      <v-col cols="12" sm="6" md="3">
+        <v-card color="primary" dark>
+          <v-card-text>
+            <div class="d-flex align-center">
+              <v-icon size="40" class="mr-4">mdi-api</v-icon>
+              <div>
+                <div class="text-h4 font-weight-bold">{{ totalEndpoints }}</div>
+                <div class="text-subtitle1">Total Endpoints</div>
+              </div>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+      
+      <v-col cols="12" sm="6" md="3">
+        <v-card color="success" dark>
+          <v-card-text>
+            <div class="d-flex align-center">
+              <v-icon size="40" class="mr-4">mdi-play-circle</v-icon>
+              <div>
+                <div class="text-h4 font-weight-bold">{{ activeEndpoints }}</div>
+                <div class="text-subtitle1">Active Endpoints</div>
+              </div>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+      
+      <v-col cols="12" sm="6" md="3">
+        <v-card color="info" dark>
+          <v-card-text>
+            <div class="d-flex align-center">
+              <v-icon size="40" class="mr-4">mdi-check-circle</v-icon>
+              <div>
+                <div class="text-h4 font-weight-bold">{{ healthyEndpoints }}</div>
+                <div class="text-subtitle1">Healthy Endpoints</div>
+              </div>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+      
+      <v-col cols="12" sm="6" md="3">
+        <v-card color="error" dark>
+          <v-card-text>
+            <div class="d-flex align-center">
+              <v-icon size="40" class="mr-4">mdi-alert-circle</v-icon>
+              <div>
+                <div class="text-h4 font-weight-bold">{{ unhealthyEndpoints }}</div>
+                <div class="text-subtitle1">Unhealthy Endpoints</div>
+              </div>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <!-- Endpoints Management -->
+    <v-row class="mt-4">
       <v-col cols="12">
         <v-card>
           <v-card-title>
@@ -9,14 +69,19 @@
             
             <v-spacer></v-spacer>
             
-            <v-btn color="primary" @click="showCreateDialog">
+            <v-btn color="primary" @click="showCreateDialog" class="mr-2">
               <v-icon left>mdi-plus</v-icon>
               Add Endpoint
+            </v-btn>
+            
+            <v-btn color="info" @click="refreshData" :loading="loading">
+              <v-icon left>mdi-refresh</v-icon>
+              Refresh
             </v-btn>
           </v-card-title>
           
           <v-data-table
-            :headers="headers"
+            :headers="endpointHeaders"
             :items="endpoints"
             :loading="loading"
             class="elevation-1"
@@ -168,21 +233,6 @@
       </v-card>
     </v-dialog>
 
-    <!-- Snackbar for notifications -->
-    <v-snackbar
-      v-model="snackbar"
-      :color="snackbarColor"
-      :timeout="3000"
-      top
-    >
-      {{ snackbarText }}
-      <template v-slot:actions>
-        <v-btn color="white" variant="text" @click="snackbar = false">
-          Close
-        </v-btn>
-      </template>
-    </v-snackbar>
-
     <!-- Logs Dialog -->
     <v-dialog v-model="logsDialog" max-width="1200px">
       <v-card>
@@ -234,8 +284,7 @@
               
               <v-expansion-panel-text>
                 <v-row>
-                  
-                <v-col cols="12" md="6">
+                  <v-col cols="12" md="6">
                     <h4 class="mb-3">Response Headers</h4>
                     <v-sheet 
                         v-if="log.response_headers && log.response_headers.trim()" 
@@ -254,7 +303,7 @@
                         </div>
                     </v-sheet>
                     <v-alert v-else type="info" variant="outlined">No headers available</v-alert>
-                </v-col>
+                  </v-col>
                   
                   <v-col cols="12" md="6">
                     <h4 class="mb-3">Response Body</h4>
@@ -294,6 +343,21 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Snackbar for notifications -->
+    <v-snackbar
+      v-model="snackbar"
+      :color="snackbarColor"
+      :timeout="3000"
+      top
+    >
+      {{ snackbarText }}
+      <template v-slot:actions>
+        <v-btn color="white" variant="text" @click="snackbar = false">
+          Close
+        </v-btn>
+      </template>
+    </v-snackbar>
   </v-container>
 </template>
 
@@ -303,29 +367,36 @@ import axios from 'axios'
 const API_BASE = import.meta.env.DEV ? '/api/v1' : 'http://localhost:8080/api/v1'
 
 export default {
-  name: 'EndpointsView',
+  name: 'Dashboard',
   
   data() {
     return {
       endpoints: [],
+      logs: [],
+      loading: false,
+      logsLoading: false,
+      
+      // Dialog states
       dialog: false,
       deleteDialog: false,
+      logsDialog: false,
+      
+      // Form states
       isEditMode: false,
-      loading: false,
       saving: false,
       deleting: false,
       valid: false,
+      
+      // Snackbar
       snackbar: false,
       snackbarText: '',
       snackbarColor: 'success',
-      deletingEndpoint: null,
       
-      // Logs related
-      logsDialog: false,
-      logs: [],
-      logsLoading: false,
+      // Selected items
+      deletingEndpoint: null,
       selectedEndpoint: null,
       
+      // Form data
       endpointForm: {
         id: null,
         name: '',
@@ -338,6 +409,7 @@ export default {
         is_active: true
       },
       
+      // Validation rules
       urlRules: [
         v => !!v || 'URL is required',
         v => {
@@ -350,7 +422,8 @@ export default {
         }
       ],
       
-      tableHeaders: [
+      // Table headers
+      endpointHeaders: [
         { title: 'URL', key: 'url', sortable: false },
         { title: 'Status', key: 'status', sortable: false },
         { title: 'Interval', key: 'check_interval_seconds', sortable: true },
@@ -361,17 +434,31 @@ export default {
   },
   
   computed: {
-    headers() {
-      return this.tableHeaders
+    totalEndpoints() {
+      return this.endpoints.length
+    },
+    
+    activeEndpoints() {
+      return this.endpoints.filter(endpoint => endpoint.is_active).length
+    },
+    
+    healthyEndpoints() {
+      // For now, consider active endpoints as healthy
+      // This could be enhanced with actual health status
+      return this.activeEndpoints
+    },
+    
+    unhealthyEndpoints() {
+      return this.totalEndpoints - this.healthyEndpoints
     }
   },
   
   mounted() {
-    this.fetchEndpoints()
+    this.refreshData()
   },
   
   methods: {
-    async fetchEndpoints() {
+    async refreshData() {
       this.loading = true
       try {
         const response = await axios.get(`${API_BASE}/endpoints`)
@@ -384,6 +471,7 @@ export default {
       }
     },
     
+    // Endpoint management methods
     showCreateDialog() {
       this.resetForm()
       this.isEditMode = false
@@ -401,13 +489,12 @@ export default {
       
       this.saving = true
       
-      // Set default values for simplified form
       const payload = {
         ...this.endpointForm,
-        name: this.endpointForm.url, // Auto-generate name from URL
-        method: 'GET', // Default to GET
-        headers: {}, // Empty headers
-        body: '' // Empty body
+        name: this.endpointForm.url,
+        method: 'GET',
+        headers: {},
+        body: ''
       }
       
       try {
@@ -420,7 +507,7 @@ export default {
         }
         
         this.dialog = false
-        this.fetchEndpoints()
+        this.refreshData()
       } catch (error) {
         this.showSnackbar('Failed to save endpoint', 'error')
         console.error(error)
@@ -435,7 +522,6 @@ export default {
         this.showSnackbar(`Endpoint ${endpoint.is_active ? 'activated' : 'deactivated'}`, 'success')
       } catch (error) {
         this.showSnackbar('Failed to toggle endpoint', 'error')
-        // Revert the switch
         endpoint.is_active = !endpoint.is_active
         console.error(error)
       }
@@ -453,7 +539,7 @@ export default {
         await axios.delete(`${API_BASE}/endpoints/${this.deletingEndpoint.id}`)
         this.showSnackbar('Endpoint deleted successfully', 'success')
         this.deleteDialog = false
-        this.fetchEndpoints()
+        this.refreshData()
       } catch (error) {
         this.showSnackbar('Failed to delete endpoint', 'error')
         console.error(error)
@@ -510,11 +596,9 @@ export default {
     
     formatResponseBody(body) {
       try {
-        // Try to format as JSON if possible
         const parsed = JSON.parse(body)
         return JSON.stringify(parsed, null, 2)
       } catch {
-        // Return as-is if not JSON
         return body
       }
     },

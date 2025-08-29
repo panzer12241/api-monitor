@@ -1,9 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import Dashboard from '@/views/Dashboard.vue'
-import Endpoints from '@/views/Endpoints.vue'
 import Login from '@/views/Login.vue'
-import Grafana from '@/views/Grafana.vue'
 
 const routes = [
   {
@@ -16,18 +14,6 @@ const routes = [
     path: '/',
     name: 'Dashboard',
     component: Dashboard,
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/endpoints',
-    name: 'Endpoints',
-    component: Endpoints,
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/grafana',
-    name: 'Grafana',
-    component: Grafana,
     meta: { requiresAuth: true }
   }
 ]

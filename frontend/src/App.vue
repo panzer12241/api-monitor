@@ -112,16 +112,6 @@ export default {
           title: 'Dashboard',
           icon: 'mdi-view-dashboard',
           route: '/'
-        },
-        {
-          title: 'Endpoints',
-          icon: 'mdi-api',
-          route: '/endpoints'
-        },
-        {
-          title: 'Grafana',
-          icon: 'mdi-chart-line',
-          route: '/grafana'
         }
       ]
     }
