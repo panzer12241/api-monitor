@@ -293,6 +293,23 @@ func (m *Monitor) updatePrometheusMetrics(endpoint APIEndpoint, status float64, 
 	m.responseTime.With(labels).Observe(responseTime)
 }
 
+func (m *Monitor) deletePrometheusMetrics(endpoint APIEndpoint) {
+	labels := prometheus.Labels{
+		"endpoint_id":   strconv.Itoa(endpoint.ID),
+		"endpoint_name": endpoint.Name,
+		"url":           endpoint.URL,
+		"method":        endpoint.Method,
+	}
+
+	// Set status to 0 (down) and delete the metric
+	m.prometheusGauge.With(labels).Set(0)
+	m.prometheusGauge.Delete(labels)
+
+	// Note: Histogram metrics cannot be completely deleted in Prometheus
+	// but they will stop being updated and eventually be cleaned up by Prometheus
+	m.responseTime.Delete(labels)
+}
+
 func (m *Monitor) logCheck(endpointID, statusCode, responseTimeMs int, responseBody, errorMessage string) {
 	// Clean strings to ensure UTF-8 compatibility
 	cleanResponseBody := strings.ToValidUTF8(responseBody, "")
@@ -434,7 +451,21 @@ func (m *Monitor) deleteEndpoint(c *gin.Context) {
 		return
 	}
 
+	// Get endpoint info before deleting (for Prometheus cleanup)
+	var endpoint APIEndpoint
+	err = m.db.QueryRow("SELECT id, name, url, method, timeout_seconds, check_interval_seconds, is_active, created_at, updated_at FROM api_endpoints WHERE id = $1", endpointID).Scan(
+		&endpoint.ID, &endpoint.Name, &endpoint.URL, &endpoint.Method,
+		&endpoint.TimeoutSeconds, &endpoint.CheckIntervalSeconds, &endpoint.IsActive,
+		&endpoint.CreatedAt, &endpoint.UpdatedAt)
+	if err != nil {
+		c.JSON(404, gin.H{"error": "Endpoint not found"})
+		return
+	}
+
 	m.unscheduleEndpoint(endpointID)
+
+	// Delete Prometheus metrics for this endpoint
+	m.deletePrometheusMetrics(endpoint)
 
 	// Delete endpoint logs first (foreign key constraint)
 	_, err = m.db.Exec("DELETE FROM api_check_logs WHERE endpoint_id = $1", endpointID)
