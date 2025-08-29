@@ -112,6 +112,11 @@ export default {
           title: 'Dashboard',
           icon: 'mdi-view-dashboard',
           route: '/'
+        },
+        {
+          title: 'Proxy Management',
+          icon: 'mdi-server-network',
+          route: '/proxies'
         }
       ]
     }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -31,6 +32,8 @@ type APIEndpoint struct {
 	TimeoutSeconds       int               `json:"timeout_seconds" db:"timeout_seconds"`
 	CheckIntervalSeconds int               `json:"check_interval_seconds" db:"check_interval_seconds"`
 	IsActive             bool              `json:"is_active" db:"is_active"`
+	ProxyID              *int              `json:"proxy_id" db:"proxy_id"`
+	Proxy                *Proxy            `json:"proxy,omitempty"`
 	CreatedAt            time.Time         `json:"created_at" db:"created_at"`
 	UpdatedAt            time.Time         `json:"updated_at" db:"updated_at"`
 }
@@ -44,6 +47,18 @@ type APICheckLog struct {
 	ResponseHeaders string    `json:"response_headers"`
 	ErrorMessage    string    `json:"error_message"`
 	CheckedAt       time.Time `json:"checked_at"`
+}
+
+type Proxy struct {
+	ID        int       `json:"id" db:"id"`
+	Name      string    `json:"name" db:"name"`
+	Host      string    `json:"host" db:"host"`
+	Port      int       `json:"port" db:"port"`
+	Username  string    `json:"username" db:"username"`
+	Password  string    `json:"password" db:"password"`
+	IsActive  bool      `json:"is_active" db:"is_active"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type Monitor struct {
@@ -224,6 +239,7 @@ func main() {
 	// API endpoints
 	api := r.Group("/api/v1")
 	{
+		// Endpoint management
 		api.GET("/endpoints", monitor.getEndpoints)
 		api.POST("/endpoints", monitor.createEndpoint)
 		api.PUT("/endpoints/:id", monitor.updateEndpoint)
@@ -232,6 +248,13 @@ func main() {
 		api.GET("/endpoints/:id/logs", monitor.getEndpointLogs)
 		api.POST("/endpoints/:id/check", monitor.manualCheck)
 		api.POST("/cleanup-logs", monitor.manualCleanup)
+
+		// Proxy management
+		api.GET("/proxies", monitor.getProxies)
+		api.POST("/proxies", monitor.createProxy)
+		api.PUT("/proxies/:id", monitor.updateProxy)
+		api.DELETE("/proxies/:id", monitor.deleteProxy)
+		api.POST("/proxies/:id/toggle", monitor.toggleProxy)
 	}
 
 	log.Println("API Monitor started on :8080")
@@ -268,7 +291,13 @@ func getEnv(key, fallback string) string {
 }
 
 func (m *Monitor) loadActiveEndpoints() {
-	rows, err := m.db.Query("SELECT id, name, url, method, COALESCE(headers, '{}'), COALESCE(body, ''), timeout_seconds, check_interval_seconds FROM api_endpoints WHERE is_active = true")
+	rows, err := m.db.Query(`
+		SELECT e.id, e.name, e.url, e.method, COALESCE(e.headers, '{}'), COALESCE(e.body, ''), 
+		       e.timeout_seconds, e.check_interval_seconds, e.proxy_id,
+		       p.host, p.port, p.username, p.password
+		FROM api_endpoints e
+		LEFT JOIN proxies p ON e.proxy_id = p.id AND p.is_active = true
+		WHERE e.is_active = true`)
 	if err != nil {
 		log.Printf("Error loading active endpoints: %v", err)
 		return
@@ -277,16 +306,34 @@ func (m *Monitor) loadActiveEndpoints() {
 
 	for rows.Next() {
 		var endpoint APIEndpoint
+		var proxy Proxy
 		var headersJSON string
+		var proxyID sql.NullInt64
+		var proxyHost, proxyUsername, proxyPassword sql.NullString
+		var proxyPort sql.NullInt64
 
 		err := rows.Scan(&endpoint.ID, &endpoint.Name, &endpoint.URL, &endpoint.Method,
-			&headersJSON, &endpoint.Body, &endpoint.TimeoutSeconds, &endpoint.CheckIntervalSeconds)
+			&headersJSON, &endpoint.Body, &endpoint.TimeoutSeconds, &endpoint.CheckIntervalSeconds, &proxyID,
+			&proxyHost, &proxyPort, &proxyUsername, &proxyPassword)
 		if err != nil {
 			log.Printf("Error scanning endpoint: %v", err)
 			continue
 		}
 
 		json.Unmarshal([]byte(headersJSON), &endpoint.Headers)
+
+		// Set proxy data if available
+		if proxyID.Valid {
+			endpoint.ProxyID = &[]int{int(proxyID.Int64)}[0]
+			if proxyHost.Valid {
+				proxy.Host = proxyHost.String
+				proxy.Port = int(proxyPort.Int64)
+				proxy.Username = proxyUsername.String
+				proxy.Password = proxyPassword.String
+				endpoint.Proxy = &proxy
+			}
+		}
+
 		m.scheduleEndpoint(endpoint)
 	}
 }
@@ -328,8 +375,30 @@ func (m *Monitor) unscheduleEndpoint(endpointID int) {
 func (m *Monitor) checkEndpoint(endpoint APIEndpoint) {
 	start := time.Now()
 
+	// Create HTTP client with optional proxy
 	client := &http.Client{
 		Timeout: time.Duration(endpoint.TimeoutSeconds) * time.Second,
+	}
+
+	// Configure proxy if specified
+	if endpoint.Proxy != nil && endpoint.Proxy.Host != "" {
+		proxyURL := fmt.Sprintf("http://%s:%d", endpoint.Proxy.Host, endpoint.Proxy.Port)
+
+		// Add authentication if provided
+		if endpoint.Proxy.Username != "" && endpoint.Proxy.Password != "" {
+			proxyURL = fmt.Sprintf("http://%s:%s@%s:%d",
+				endpoint.Proxy.Username, endpoint.Proxy.Password,
+				endpoint.Proxy.Host, endpoint.Proxy.Port)
+		}
+
+		proxy, err := url.Parse(proxyURL)
+		if err != nil {
+			log.Printf("Error parsing proxy URL for endpoint %s: %v", endpoint.Name, err)
+		} else {
+			client.Transport = &http.Transport{
+				Proxy: http.ProxyURL(proxy),
+			}
+		}
 	}
 
 	var req *http.Request
@@ -495,8 +564,15 @@ func (m *Monitor) manualCleanup(c *gin.Context) {
 
 func (m *Monitor) getEndpoints(c *gin.Context) {
 	rows, err := m.db.Query(`
-		SELECT id, name, url, method, COALESCE(headers, '{}'), COALESCE(body, ''), timeout_seconds, check_interval_seconds, is_active, created_at, updated_at
-		FROM api_endpoints ORDER BY created_at DESC`)
+		SELECT 
+			e.id, e.name, e.url, e.method, 
+			COALESCE(e.headers, '{}'), COALESCE(e.body, ''), 
+			e.timeout_seconds, e.check_interval_seconds, e.is_active, 
+			e.proxy_id, e.created_at, e.updated_at,
+			p.id, p.name, p.host, p.port, p.username, p.password, p.is_active, p.created_at, p.updated_at
+		FROM api_endpoints e
+		LEFT JOIN proxies p ON e.proxy_id = p.id
+		ORDER BY e.created_at DESC`)
 
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -507,11 +583,19 @@ func (m *Monitor) getEndpoints(c *gin.Context) {
 	var endpoints []APIEndpoint
 	for rows.Next() {
 		var endpoint APIEndpoint
+		var proxy Proxy
 		var headersJSON string
+		var proxyID, proxyIdFromJoin sql.NullInt64
+		var proxyName, proxyHost, proxyUsername, proxyPassword sql.NullString
+		var proxyPort sql.NullInt64
+		var proxyIsActive sql.NullBool
+		var proxyCreatedAt, proxyUpdatedAt sql.NullTime
 
 		err := rows.Scan(&endpoint.ID, &endpoint.Name, &endpoint.URL, &endpoint.Method,
 			&headersJSON, &endpoint.Body, &endpoint.TimeoutSeconds, &endpoint.CheckIntervalSeconds,
-			&endpoint.IsActive, &endpoint.CreatedAt, &endpoint.UpdatedAt)
+			&endpoint.IsActive, &proxyID, &endpoint.CreatedAt, &endpoint.UpdatedAt,
+			&proxyIdFromJoin, &proxyName, &proxyHost, &proxyPort, &proxyUsername, &proxyPassword,
+			&proxyIsActive, &proxyCreatedAt, &proxyUpdatedAt)
 
 		if err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
@@ -519,6 +603,26 @@ func (m *Monitor) getEndpoints(c *gin.Context) {
 		}
 
 		json.Unmarshal([]byte(headersJSON), &endpoint.Headers)
+
+		// Set proxy_id
+		if proxyID.Valid {
+			endpoint.ProxyID = &[]int{int(proxyID.Int64)}[0]
+		}
+
+		// Set proxy object if exists
+		if proxyIdFromJoin.Valid {
+			proxy.ID = int(proxyIdFromJoin.Int64)
+			proxy.Name = proxyName.String
+			proxy.Host = proxyHost.String
+			proxy.Port = int(proxyPort.Int64)
+			proxy.Username = proxyUsername.String
+			proxy.Password = proxyPassword.String
+			proxy.IsActive = proxyIsActive.Bool
+			proxy.CreatedAt = proxyCreatedAt.Time
+			proxy.UpdatedAt = proxyUpdatedAt.Time
+			endpoint.Proxy = &proxy
+		}
+
 		endpoints = append(endpoints, endpoint)
 	}
 
@@ -546,11 +650,11 @@ func (m *Monitor) createEndpoint(c *gin.Context) {
 	headersJSON, _ := json.Marshal(endpoint.Headers)
 
 	err := m.db.QueryRow(`
-		INSERT INTO api_endpoints (name, url, method, headers, body, timeout_seconds, check_interval_seconds, is_active)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO api_endpoints (name, url, method, headers, body, timeout_seconds, check_interval_seconds, is_active, proxy_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, created_at, updated_at`,
 		endpoint.Name, endpoint.URL, endpoint.Method, string(headersJSON), endpoint.Body,
-		endpoint.TimeoutSeconds, endpoint.CheckIntervalSeconds, endpoint.IsActive).
+		endpoint.TimeoutSeconds, endpoint.CheckIntervalSeconds, endpoint.IsActive, endpoint.ProxyID).
 		Scan(&endpoint.ID, &endpoint.CreatedAt, &endpoint.UpdatedAt)
 
 	if err != nil {
@@ -598,10 +702,10 @@ func (m *Monitor) updateEndpoint(c *gin.Context) {
 	_, err = m.db.Exec(`
 		UPDATE api_endpoints 
 		SET name = $1, url = $2, method = $3, headers = $4, body = $5, 
-		    timeout_seconds = $6, check_interval_seconds = $7, is_active = $8, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $9`,
+		    timeout_seconds = $6, check_interval_seconds = $7, is_active = $8, proxy_id = $9, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $10`,
 		endpoint.Name, endpoint.URL, endpoint.Method, string(headersJSON), endpoint.Body,
-		endpoint.TimeoutSeconds, endpoint.CheckIntervalSeconds, endpoint.IsActive, endpointID)
+		endpoint.TimeoutSeconds, endpoint.CheckIntervalSeconds, endpoint.IsActive, endpoint.ProxyID, endpointID)
 
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -835,4 +939,152 @@ func (m *Monitor) handleWebSocket(c *gin.Context) {
 			break
 		}
 	}
+}
+
+// Proxy management methods
+func (m *Monitor) getProxies(c *gin.Context) {
+	rows, err := m.db.Query(`
+		SELECT id, name, host, port, username, password, is_active, created_at, updated_at
+		FROM proxies 
+		ORDER BY created_at DESC`)
+
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	var proxies []Proxy
+	for rows.Next() {
+		var proxy Proxy
+		err := rows.Scan(&proxy.ID, &proxy.Name, &proxy.Host, &proxy.Port,
+			&proxy.Username, &proxy.Password, &proxy.IsActive,
+			&proxy.CreatedAt, &proxy.UpdatedAt)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		proxies = append(proxies, proxy)
+	}
+
+	c.JSON(200, proxies)
+}
+
+func (m *Monitor) createProxy(c *gin.Context) {
+	var proxy Proxy
+	if err := c.ShouldBindJSON(&proxy); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate required fields
+	if proxy.Name == "" || proxy.Host == "" || proxy.Port <= 0 {
+		c.JSON(400, gin.H{"error": "Name, host, and port are required"})
+		return
+	}
+
+	err := m.db.QueryRow(`
+		INSERT INTO proxies (name, host, port, username, password, is_active, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+		RETURNING id, created_at, updated_at`,
+		proxy.Name, proxy.Host, proxy.Port, proxy.Username, proxy.Password, proxy.IsActive).
+		Scan(&proxy.ID, &proxy.CreatedAt, &proxy.UpdatedAt)
+
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to create proxy: " + err.Error()})
+		return
+	}
+
+	c.JSON(201, proxy)
+}
+
+func (m *Monitor) updateProxy(c *gin.Context) {
+	id := c.Param("id")
+	proxyID, err := strconv.Atoi(id)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "Invalid proxy ID"})
+		return
+	}
+
+	var proxy Proxy
+	if err := c.ShouldBindJSON(&proxy); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	proxy.ID = proxyID
+
+	err = m.db.QueryRow(`
+		UPDATE proxies 
+		SET name = $1, host = $2, port = $3, username = $4, password = $5, is_active = $6, updated_at = NOW()
+		WHERE id = $7
+		RETURNING created_at, updated_at`,
+		proxy.Name, proxy.Host, proxy.Port, proxy.Username, proxy.Password, proxy.IsActive, proxyID).
+		Scan(&proxy.CreatedAt, &proxy.UpdatedAt)
+
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to update proxy: " + err.Error()})
+		return
+	}
+
+	c.JSON(200, proxy)
+}
+
+func (m *Monitor) deleteProxy(c *gin.Context) {
+	id := c.Param("id")
+	proxyID, err := strconv.Atoi(id)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "Invalid proxy ID"})
+		return
+	}
+
+	// Check if any endpoints are using this proxy
+	var count int
+	err = m.db.QueryRow("SELECT COUNT(*) FROM api_endpoints WHERE proxy_id = $1", proxyID).Scan(&count)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to check proxy usage: " + err.Error()})
+		return
+	}
+
+	if count > 0 {
+		c.JSON(400, gin.H{"error": fmt.Sprintf("Cannot delete proxy: %d endpoints are using this proxy", count)})
+		return
+	}
+
+	_, err = m.db.Exec("DELETE FROM proxies WHERE id = $1", proxyID)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to delete proxy: " + err.Error()})
+		return
+	}
+
+	c.JSON(200, gin.H{"message": "Proxy deleted successfully"})
+}
+
+func (m *Monitor) toggleProxy(c *gin.Context) {
+	id := c.Param("id")
+	proxyID, err := strconv.Atoi(id)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "Invalid proxy ID"})
+		return
+	}
+
+	var isActive bool
+	err = m.db.QueryRow("SELECT is_active FROM proxies WHERE id = $1", proxyID).Scan(&isActive)
+	if err != nil {
+		c.JSON(404, gin.H{"error": "Proxy not found"})
+		return
+	}
+
+	newStatus := !isActive
+	_, err = m.db.Exec("UPDATE proxies SET is_active = $1, updated_at = NOW() WHERE id = $2", newStatus, proxyID)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to toggle proxy status: " + err.Error()})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"id":        proxyID,
+		"is_active": newStatus,
+		"message":   fmt.Sprintf("Proxy %s", map[bool]string{true: "activated", false: "deactivated"}[newStatus]),
+	})
 }

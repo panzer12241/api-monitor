@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import Dashboard from '@/views/Dashboard.vue'
+import ProxyManagement from '@/views/ProxyManagement.vue'
 import Login from '@/views/Login.vue'
 
 const routes = [
@@ -14,6 +15,12 @@ const routes = [
     path: '/',
     name: 'Dashboard',
     component: Dashboard,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/proxies',
+    name: 'ProxyManagement',
+    component: ProxyManagement,
     meta: { requiresAuth: true }
   }
 ]

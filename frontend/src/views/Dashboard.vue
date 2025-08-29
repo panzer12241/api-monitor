@@ -222,6 +222,34 @@
               </v-col>
             </v-row>
             
+            <v-select
+              v-model="endpointForm.proxy_id"
+              :items="proxyOptions"
+              item-title="name"
+              item-value="id"
+              label="Proxy (Optional)"
+              clearable
+              outlined
+              prepend-inner-icon="mdi-server-network"
+            >
+              <template v-slot:item="{ props, item }">
+                <v-list-item v-bind="props" :disabled="!item.raw.is_active">
+                  <v-list-item-title>{{ item.raw.name }}</v-list-item-title>
+                  <v-list-item-subtitle>
+                    {{ item.raw.host }}:{{ item.raw.port }}
+                    <v-chip
+                      v-if="!item.raw.is_active"
+                      size="x-small"
+                      color="error"
+                      class="ml-2"
+                    >
+                      Inactive
+                    </v-chip>
+                  </v-list-item-subtitle>
+                </v-list-item>
+              </template>
+            </v-select>
+            
             <v-switch
               v-model="endpointForm.is_active"
               label="Active"
@@ -418,6 +446,7 @@ export default {
   data() {
     return {
       endpoints: [],
+      proxies: [],
       logs: [],
       loading: false,
       logsLoading: false,
@@ -452,7 +481,8 @@ export default {
         body: '',
         timeout_seconds: 30,
         check_interval_seconds: 60,
-        is_active: true
+        is_active: true,
+        proxy_id: null
       },
       
       // Validation rules
@@ -506,11 +536,16 @@ export default {
         id: endpoint.id,
         name: endpoint.url
       }))
+    },
+    
+    proxyOptions() {
+      return this.proxies.filter(proxy => proxy.is_active)
     }
   },
   
   mounted() {
     this.refreshData()
+    this.fetchProxies()
     // Set default chart endpoint after data loads
     this.$nextTick(() => {
       if (this.endpoints.length > 0) {
@@ -543,6 +578,16 @@ export default {
         console.error(error)
       } finally {
         this.loading = false
+      }
+    },
+    
+    async fetchProxies() {
+      try {
+        const response = await axios.get(`${API_BASE}/proxies`)
+        this.proxies = response.data || []
+      } catch (error) {
+        console.error('Failed to fetch proxies:', error)
+        this.proxies = []
       }
     },
     
@@ -633,7 +678,8 @@ export default {
         body: '',
         timeout_seconds: 30,
         check_interval_seconds: 60,
-        is_active: true
+        is_active: true,
+        proxy_id: null
       }
     },
     
