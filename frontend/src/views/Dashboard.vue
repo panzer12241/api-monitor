@@ -66,9 +66,24 @@
           <v-card-title>
             <v-icon left>mdi-chart-line</v-icon>
             Response Time Trends
+            
+            <v-spacer></v-spacer>
+            
+            <v-btn 
+              color="info" 
+              @click="refreshChart" 
+              size="small"
+              :loading="chartLoading"
+            >
+              <v-icon left>mdi-refresh</v-icon>
+              Refresh Chart
+            </v-btn>
           </v-card-title>
           <v-card-text>
-            <ResponseTimeChart ref="responseTimeChart" :endpoint-id="selectedChartEndpoint" />
+            <ResponseTimeChart 
+              ref="responseTimeChart" 
+              :endpoint-id="selectedChartEndpoint"
+            />
           </v-card-text>
           <v-card-actions>
             <v-select
@@ -565,6 +580,7 @@ export default {
       logs: [],
       loading: false,
       logsLoading: false,
+      chartLoading: false,
       
       // Pagination for logs
       currentPage: 1,
@@ -936,6 +952,37 @@ export default {
       this.snackbar = true
     },
     
+    // Refresh chart manually
+    refreshChart() {
+      if (this.$refs.responseTimeChart) {
+        this.chartLoading = true
+        this.$refs.responseTimeChart.fetchLogs().finally(() => {
+          this.chartLoading = false
+        })
+      }
+    },
+    
+    // Update specific endpoint without full refresh
+    updateEndpointStats(data) {
+      // Find and update the specific endpoint
+      const endpointIndex = this.endpoints.findIndex(ep => ep.id === data.endpoint_id)
+      if (endpointIndex !== -1) {
+        // Update endpoint with the latest check information
+        const endpoint = this.endpoints[endpointIndex]
+        
+        // Update last check status (this can be used for health indicators)
+        endpoint.last_check = {
+          status_code: data.status_code,
+          response_time: data.response_time,
+          success: data.success,
+          timestamp: data.timestamp
+        }
+        
+        // Use Vue.set to ensure reactivity
+        this.$set(this.endpoints, endpointIndex, { ...endpoint })
+      }
+    },
+    
     // WebSocket methods
     setupWebSocket() {
       // Connect to WebSocket
@@ -943,24 +990,23 @@ export default {
       
       // Listen for endpoint check updates
       wsClient.on('endpoint_checked', (data) => {
-        console.log('Real-time endpoint check update:', data)
-        // Refresh endpoint list to get updated stats
-        this.refreshData()
-        // Trigger chart updates by emitting an event
-        this.$refs.responseTimeChart?.updateChart()
+        // Update specific endpoint stats without full refresh
+        this.updateEndpointStats(data)
       })
       
       // Listen for endpoint created
       wsClient.on('endpoint_created', (data) => {
         console.log('New endpoint created:', data)
-        this.refreshData()
+        // Add new endpoint to existing list instead of full refresh
+        this.endpoints.push(data)
         this.showSnackbar(`New endpoint "${data.name}" created`, 'success')
       })
       
       // Listen for endpoint deleted
       wsClient.on('endpoint_deleted', (data) => {
         console.log('Endpoint deleted:', data)
-        this.refreshData()
+        // Remove endpoint from list instead of full refresh
+        this.endpoints = this.endpoints.filter(ep => ep.id !== data.id)
         this.showSnackbar('Endpoint deleted', 'info')
       })
     },

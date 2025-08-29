@@ -1,7 +1,10 @@
 <template>
   <div style="height: 300px; position: relative;">
+    <div v-if="loading" class="d-flex align-center justify-center" style="height: 100%;">
+      <v-progress-circular indeterminate color="primary"></v-progress-circular>
+    </div>
     <Line
-      v-if="chartData.datasets.length > 0"
+      v-else-if="chartData.datasets.length > 0 && logs.length > 0"
       :data="chartData"
       :options="chartOptions"
     />
@@ -133,23 +136,26 @@ export default {
   watch: {
     endpointId: {
       handler: 'fetchLogs',
-      immediate: false
+      immediate: true
     }
   },
   methods: {
     async fetchLogs() {
       if (!this.endpointId) {
         this.logs = []
-        return
+        return Promise.resolve()
       }
       
       this.loading = true
       try {
-        const response = await axios.get(`${API_BASE}/endpoints/${this.endpointId}/logs?limit=50`)
-        this.logs = response.data || []
+        const url = `${API_BASE}/endpoints/${this.endpointId}/logs?limit=50`
+        const response = await axios.get(url)
+        this.logs = response.data.logs || response.data || []
+        return Promise.resolve()
       } catch (error) {
         console.error('Failed to fetch logs for chart:', error)
         this.logs = []
+        return Promise.reject(error)
       } finally {
         this.loading = false
       }
@@ -157,7 +163,7 @@ export default {
     
     updateChart() {
       // Refresh the chart data by fetching logs again
-      this.fetchLogs()
+      return this.fetchLogs()
     }
   }
 }
