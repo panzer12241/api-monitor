@@ -856,14 +856,73 @@ func (m *Monitor) getEndpointLogs(c *gin.Context) {
 		return
 	}
 
-	limit := c.DefaultQuery("limit", "100")
+	limit := c.DefaultQuery("limit", "25")
+	offset := c.DefaultQuery("offset", "0")
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	minResponseTime := c.Query("min_response_time")
+	statusCode := c.Query("status_code")
 
-	rows, err := m.db.Query(`
+	// Build WHERE clause dynamically
+	whereClause := "WHERE endpoint_id = $1"
+	args := []interface{}{endpointID}
+	argIndex := 2
+
+	// Add date filters
+	if startDate != "" {
+		whereClause += fmt.Sprintf(" AND checked_at >= $%d", argIndex)
+		args = append(args, startDate)
+		argIndex++
+	}
+	if endDate != "" {
+		whereClause += fmt.Sprintf(" AND checked_at <= $%d", argIndex)
+		args = append(args, endDate)
+		argIndex++
+	}
+
+	// Add response time filter
+	if minResponseTime != "" {
+		whereClause += fmt.Sprintf(" AND response_time_ms >= $%d", argIndex)
+		args = append(args, minResponseTime)
+		argIndex++
+	}
+
+	// Add status code filter
+	if statusCode != "" {
+		if statusCode == "2xx" {
+			whereClause += " AND status_code >= 200 AND status_code < 300"
+		} else if statusCode == "3xx" {
+			whereClause += " AND status_code >= 300 AND status_code < 400"
+		} else if statusCode == "4xx" {
+			whereClause += " AND status_code >= 400 AND status_code < 500"
+		} else if statusCode == "5xx" {
+			whereClause += " AND status_code >= 500 AND status_code < 600"
+		} else {
+			whereClause += fmt.Sprintf(" AND status_code = $%d", argIndex)
+			args = append(args, statusCode)
+			argIndex++
+		}
+	}
+
+	// Get total count with filters
+	countQuery := "SELECT COUNT(*) FROM api_check_logs " + whereClause
+	var totalCount int
+	err = m.db.QueryRow(countQuery, args...).Scan(&totalCount)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to get total count: " + err.Error()})
+		return
+	}
+
+	// Get paginated logs with filters
+	query := fmt.Sprintf(`
 		SELECT id, endpoint_id, status_code, response_time_ms, response_body, COALESCE(response_headers, ''), error_message, checked_at
 		FROM api_check_logs 
-		WHERE endpoint_id = $1 
+		%s 
 		ORDER BY checked_at DESC 
-		LIMIT $2`, endpointID, limit)
+		LIMIT $%d OFFSET $%d`, whereClause, argIndex, argIndex+1)
+
+	args = append(args, limit, offset)
+	rows, err := m.db.Query(query, args...)
 
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -883,7 +942,13 @@ func (m *Monitor) getEndpointLogs(c *gin.Context) {
 		logs = append(logs, log)
 	}
 
-	c.JSON(200, logs)
+	// Return paginated response
+	c.JSON(200, gin.H{
+		"logs":   logs,
+		"total":  totalCount,
+		"limit":  limit,
+		"offset": offset,
+	})
 }
 
 func (m *Monitor) manualCheck(c *gin.Context) {

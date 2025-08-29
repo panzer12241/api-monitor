@@ -318,6 +318,81 @@
           </v-btn>
         </v-card-title>
         
+        <!-- Filters Section -->
+        <v-card-text class="pb-0">
+          <v-expansion-panels v-model="filtersExpanded">
+            <v-expansion-panel>
+              <v-expansion-panel-title>
+                <v-icon left>mdi-filter</v-icon>
+                Advanced Filters
+              </v-expansion-panel-title>
+              <v-expansion-panel-text>
+                <v-row>
+                  <v-col cols="12" md="3">
+                    <v-text-field
+                      v-model="filters.startDate"
+                      label="Start Date"
+                      type="datetime-local"
+                      outlined
+                      dense
+                      @update:model-value="fetchLogs"
+                    ></v-text-field>
+                  </v-col>
+                  
+                  <v-col cols="12" md="3">
+                    <v-text-field
+                      v-model="filters.endDate"
+                      label="End Date"
+                      type="datetime-local"
+                      outlined
+                      dense
+                      @update:model-value="fetchLogs"
+                    ></v-text-field>
+                  </v-col>
+                  
+                  <v-col cols="12" md="3">
+                    <v-text-field
+                      v-model.number="filters.minResponseTime"
+                      label="Min Response Time (ms)"
+                      type="number"
+                      outlined
+                      dense
+                      placeholder="e.g. 1000"
+                      @update:model-value="fetchLogs"
+                    ></v-text-field>
+                  </v-col>
+                  
+                  <v-col cols="12" md="3">
+                    <v-select
+                      v-model="filters.statusCode"
+                      :items="statusCodeOptions"
+                      label="Status Code"
+                      outlined
+                      dense
+                      clearable
+                      @update:model-value="fetchLogs"
+                    ></v-select>
+                  </v-col>
+                </v-row>
+                
+                <v-row>
+                  <v-col cols="auto">
+                    <v-btn
+                      color="secondary"
+                      variant="outlined"
+                      @click="clearFilters"
+                      size="small"
+                    >
+                      <v-icon left>mdi-filter-remove</v-icon>
+                      Clear Filters
+                    </v-btn>
+                  </v-col>
+                </v-row>
+              </v-expansion-panel-text>
+            </v-expansion-panel>
+          </v-expansion-panels>
+        </v-card-text>
+        
         <v-card-text style="max-height: 600px; overflow-y: auto;">
           <v-progress-linear v-if="logsLoading" indeterminate></v-progress-linear>
           
@@ -404,6 +479,38 @@
           </v-alert>
         </v-card-text>
         
+        <!-- Pagination Controls -->
+        <v-card-text v-if="logs.length > 0" class="pt-0">
+          <v-row align="center" justify="space-between">
+            <v-col cols="auto">
+              <v-select
+                v-model="logsPerPage"
+                :items="[10, 25, 50, 100]"
+                label="Items per page"
+                density="compact"
+                style="width: 120px;"
+                @update:model-value="fetchLogs"
+              ></v-select>
+            </v-col>
+            
+            <v-col cols="auto">
+              <span class="text-body-2">
+                Showing {{ ((currentPage - 1) * logsPerPage) + 1 }} - 
+                {{ Math.min(currentPage * logsPerPage, totalLogs) }} of {{ totalLogs }}
+              </span>
+            </v-col>
+            
+            <v-col cols="auto">
+              <v-pagination
+                v-model="currentPage"
+                :length="totalPages"
+                :total-visible="5"
+                @update:model-value="fetchLogs"
+              ></v-pagination>
+            </v-col>
+          </v-row>
+        </v-card-text>
+        
         <v-card-actions>
           <v-spacer></v-spacer>
           <v-btn @click="logsDialog = false">Close</v-btn>
@@ -450,6 +557,20 @@ export default {
       logs: [],
       loading: false,
       logsLoading: false,
+      
+      // Pagination for logs
+      currentPage: 1,
+      logsPerPage: 25,
+      totalLogs: 0,
+      
+      // Filters for logs
+      filtersExpanded: [],
+      filters: {
+        startDate: '',
+        endDate: '',
+        minResponseTime: null,
+        statusCode: null
+      },
       
       // Dialog states
       dialog: false,
@@ -540,6 +661,22 @@ export default {
     
     proxyOptions() {
       return this.proxies.filter(proxy => proxy.is_active)
+    },
+    
+    totalPages() {
+      return Math.ceil(this.totalLogs / this.logsPerPage)
+    },
+    
+    statusCodeOptions() {
+      return [
+        { title: 'Success (2xx)', value: '2xx' },
+        { title: 'Redirect (3xx)', value: '3xx' },
+        { title: 'Client Error (4xx)', value: '4xx' },
+        { title: 'Server Error (5xx)', value: '5xx' },
+        { title: '200 OK', value: '200' },
+        { title: '404 Not Found', value: '404' },
+        { title: '500 Internal Server Error', value: '500' }
+      ]
     }
   },
   
@@ -686,6 +823,8 @@ export default {
     // Logs methods
     viewLogs(endpoint) {
       this.selectedEndpoint = endpoint
+      this.currentPage = 1  // Reset to first page
+      this.clearFilters()   // Clear filters when opening new endpoint logs
       this.logsDialog = true
       this.fetchLogs()
     },
@@ -695,13 +834,55 @@ export default {
       
       this.logsLoading = true
       try {
-        const response = await axios.get(`${API_BASE}/endpoints/${this.selectedEndpoint.id}/logs?limit=20`)
-        this.logs = response.data || []
+        const offset = (this.currentPage - 1) * this.logsPerPage
+        const params = new URLSearchParams({
+          limit: this.logsPerPage.toString(),
+          offset: offset.toString()
+        })
+        
+        // Add filters if provided
+        if (this.filters.startDate) {
+          params.append('start_date', this.filters.startDate)
+        }
+        if (this.filters.endDate) {
+          params.append('end_date', this.filters.endDate)
+        }
+        if (this.filters.minResponseTime) {
+          params.append('min_response_time', this.filters.minResponseTime.toString())
+        }
+        if (this.filters.statusCode) {
+          params.append('status_code', this.filters.statusCode)
+        }
+        
+        const response = await axios.get(`${API_BASE}/endpoints/${this.selectedEndpoint.id}/logs?${params}`)
+        
+        if (response.data) {
+          this.logs = response.data.logs || []
+          this.totalLogs = response.data.total || 0
+        } else {
+          this.logs = []
+          this.totalLogs = 0
+        }
       } catch (error) {
         this.showSnackbar('Failed to fetch logs', 'error')
         console.error(error)
+        this.logs = []
+        this.totalLogs = 0
       } finally {
         this.logsLoading = false
+      }
+    },
+    
+    clearFilters() {
+      this.filters = {
+        startDate: '',
+        endDate: '',
+        minResponseTime: null,
+        statusCode: null
+      }
+      this.currentPage = 1
+      if (this.selectedEndpoint) {
+        this.fetchLogs()
       }
     },
     
