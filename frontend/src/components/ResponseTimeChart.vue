@@ -153,6 +153,11 @@ export default {
       } finally {
         this.loading = false
       }
+    },
+    
+    updateChart() {
+      // Refresh the chart data by fetching logs again
+      this.fetchLogs()
     }
   }
 }

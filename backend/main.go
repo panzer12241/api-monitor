@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	_ "github.com/lib/pq"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -52,6 +53,89 @@ type Monitor struct {
 	jobMutex        sync.RWMutex
 	prometheusGauge *prometheus.GaugeVec
 	responseTime    *prometheus.HistogramVec
+	wsHub           *WebSocketHub
+}
+
+type WebSocketHub struct {
+	clients    map[*websocket.Conn]bool
+	broadcast  chan []byte
+	register   chan *websocket.Conn
+	unregister chan *websocket.Conn
+	mutex      sync.RWMutex
+}
+
+type WebSocketMessage struct {
+	Type string      `json:"type"`
+	Data interface{} `json:"data"`
+}
+
+func NewWebSocketHub() *WebSocketHub {
+	return &WebSocketHub{
+		clients:    make(map[*websocket.Conn]bool),
+		broadcast:  make(chan []byte),
+		register:   make(chan *websocket.Conn),
+		unregister: make(chan *websocket.Conn),
+	}
+}
+
+func (h *WebSocketHub) run() {
+	for {
+		select {
+		case client := <-h.register:
+			h.mutex.Lock()
+			h.clients[client] = true
+			h.mutex.Unlock()
+			log.Printf("WebSocket client connected. Total clients: %d", len(h.clients))
+
+		case client := <-h.unregister:
+			h.mutex.Lock()
+			if _, ok := h.clients[client]; ok {
+				delete(h.clients, client)
+				close := client.Close()
+				if close != nil {
+					log.Printf("Error closing WebSocket connection: %v", close)
+				}
+			}
+			h.mutex.Unlock()
+			log.Printf("WebSocket client disconnected. Total clients: %d", len(h.clients))
+
+		case message := <-h.broadcast:
+			h.mutex.RLock()
+			for client := range h.clients {
+				err := client.WriteMessage(websocket.TextMessage, message)
+				if err != nil {
+					log.Printf("WebSocket write error: %v", err)
+					delete(h.clients, client)
+					client.Close()
+				}
+			}
+			h.mutex.RUnlock()
+		}
+	}
+}
+
+func (h *WebSocketHub) broadcastMessage(msgType string, data interface{}) {
+	message := WebSocketMessage{
+		Type: msgType,
+		Data: data,
+	}
+	jsonData, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("Error marshalling WebSocket message: %v", err)
+		return
+	}
+
+	select {
+	case h.broadcast <- jsonData:
+	default:
+		log.Printf("WebSocket broadcast channel is full")
+	}
+}
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Allow all origins for now
+	},
 }
 
 func main() {
@@ -83,6 +167,10 @@ func main() {
 	prometheus.MustRegister(prometheusGauge)
 	prometheus.MustRegister(responseTime)
 
+	// Initialize WebSocket hub
+	wsHub := NewWebSocketHub()
+	go wsHub.run()
+
 	// Initialize monitor
 	monitor := &Monitor{
 		db:              db,
@@ -90,6 +178,7 @@ func main() {
 		activeJobs:      make(map[int]cron.EntryID),
 		prometheusGauge: prometheusGauge,
 		responseTime:    responseTime,
+		wsHub:           wsHub,
 	}
 
 	// Start cron scheduler
@@ -128,6 +217,9 @@ func main() {
 
 	// Authentication endpoint (no auth required)
 	r.POST("/api/v1/auth/login", monitor.login)
+
+	// WebSocket endpoint
+	r.GET("/ws", monitor.handleWebSocket)
 
 	// API endpoints
 	api := r.Group("/api/v1")
@@ -302,6 +394,28 @@ func (m *Monitor) checkEndpoint(endpoint APIEndpoint) {
 	}
 	m.updatePrometheusMetrics(endpoint, status, duration.Seconds())
 
+	// Broadcast real-time update via WebSocket
+	wsMessage := WebSocketMessage{
+		Type: "endpoint_checked",
+		Data: gin.H{
+			"endpoint_id":   endpoint.ID,
+			"endpoint_name": endpoint.Name,
+			"url":           endpoint.URL,
+			"status_code":   resp.StatusCode,
+			"response_time": durationMs,
+			"success":       status == 1.0,
+			"timestamp":     time.Now().Format("2006-01-02T15:04:05Z07:00"),
+		},
+	}
+
+	if msgBytes, err := json.Marshal(wsMessage); err == nil {
+		select {
+		case m.wsHub.broadcast <- msgBytes:
+		default:
+			// Channel is full, skip this message
+		}
+	}
+
 	log.Printf("Checked %s: %d (%dms)", endpoint.Name, resp.StatusCode, durationMs)
 }
 
@@ -448,6 +562,20 @@ func (m *Monitor) createEndpoint(c *gin.Context) {
 		m.scheduleEndpoint(endpoint)
 	}
 
+	// Broadcast WebSocket message for new endpoint
+	wsMessage := WebSocketMessage{
+		Type: "endpoint_created",
+		Data: endpoint,
+	}
+
+	if msgBytes, err := json.Marshal(wsMessage); err == nil {
+		select {
+		case m.wsHub.broadcast <- msgBytes:
+		default:
+			// Channel is full, skip this message
+		}
+	}
+
 	c.JSON(201, endpoint)
 }
 
@@ -526,6 +654,22 @@ func (m *Monitor) deleteEndpoint(c *gin.Context) {
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to delete endpoint: " + err.Error()})
 		return
+	}
+
+	// Broadcast WebSocket message for deleted endpoint
+	wsMessage := WebSocketMessage{
+		Type: "endpoint_deleted",
+		Data: gin.H{
+			"endpoint_id": endpointID,
+		},
+	}
+
+	if msgBytes, err := json.Marshal(wsMessage); err == nil {
+		select {
+		case m.wsHub.broadcast <- msgBytes:
+		default:
+			// Channel is full, skip this message
+		}
 	}
 
 	c.JSON(200, gin.H{"message": "Endpoint and all related logs deleted successfully"})
@@ -661,5 +805,34 @@ func (m *Monitor) login(c *gin.Context) {
 			"success": false,
 			"error":   "Invalid credentials",
 		})
+	}
+}
+
+// WebSocket handler for real-time updates
+func (m *Monitor) handleWebSocket(c *gin.Context) {
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		log.Printf("Failed to upgrade connection: %v", err)
+		return
+	}
+
+	// Register client with hub
+	m.wsHub.register <- conn
+
+	// Handle connection cleanup when function exits
+	defer func() {
+		m.wsHub.unregister <- conn
+		conn.Close()
+	}()
+
+	// Keep connection alive and handle incoming messages
+	for {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("WebSocket error: %v", err)
+			}
+			break
+		}
 	}
 }

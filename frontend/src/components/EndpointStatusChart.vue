@@ -72,6 +72,13 @@ export default {
         }
       }
     }
+  },
+  methods: {
+    updateChart() {
+      // Force reactivity by updating the chart
+      // The computed chartData will automatically recalculate
+      this.$forceUpdate()
+    }
   }
 }
 </script>

@@ -68,7 +68,7 @@
             Endpoint Status Distribution
           </v-card-title>
           <v-card-text>
-            <EndpointStatusChart :endpoints="endpoints" />
+            <EndpointStatusChart ref="statusChart" :endpoints="endpoints" />
           </v-card-text>
         </v-card>
       </v-col>
@@ -80,7 +80,7 @@
             Response Time Trends
           </v-card-title>
           <v-card-text>
-            <ResponseTimeChart :endpoint-id="selectedChartEndpoint" />
+            <ResponseTimeChart ref="responseTimeChart" :endpoint-id="selectedChartEndpoint" />
           </v-card-text>
           <v-card-actions>
             <v-select
@@ -404,6 +404,7 @@
 import axios from 'axios'
 import EndpointStatusChart from '@/components/EndpointStatusChart.vue'
 import ResponseTimeChart from '@/components/ResponseTimeChart.vue'
+import { wsClient } from '@/services/websocket.js'
 
 const API_BASE = import.meta.env.DEV ? '/api/v1' : 'http://localhost:8080/api/v1'
 
@@ -516,6 +517,14 @@ export default {
         this.selectedChartEndpoint = this.endpoints[0].id
       }
     })
+    
+    // Setup WebSocket connection
+    this.setupWebSocket()
+  },
+  
+  beforeUnmount() {
+    // Cleanup WebSocket connection
+    this.cleanupWebSocket()
   },
   
   methods: {
@@ -677,6 +686,45 @@ export default {
       this.snackbarText = text
       this.snackbarColor = color
       this.snackbar = true
+    },
+    
+    // WebSocket methods
+    setupWebSocket() {
+      // Connect to WebSocket
+      wsClient.connect()
+      
+      // Listen for endpoint check updates
+      wsClient.on('endpoint_checked', (data) => {
+        console.log('Real-time endpoint check update:', data)
+        // Refresh endpoint list to get updated stats
+        this.refreshData()
+        // Trigger chart updates by emitting an event
+        this.$refs.statusChart?.updateChart()
+        this.$refs.responseTimeChart?.updateChart()
+      })
+      
+      // Listen for endpoint created
+      wsClient.on('endpoint_created', (data) => {
+        console.log('New endpoint created:', data)
+        this.refreshData()
+        this.showSnackbar(`New endpoint "${data.name}" created`, 'success')
+      })
+      
+      // Listen for endpoint deleted
+      wsClient.on('endpoint_deleted', (data) => {
+        console.log('Endpoint deleted:', data)
+        this.refreshData()
+        this.showSnackbar('Endpoint deleted', 'info')
+      })
+    },
+    
+    cleanupWebSocket() {
+      // Remove all listeners
+      wsClient.off('endpoint_checked')
+      wsClient.off('endpoint_created')
+      wsClient.off('endpoint_deleted')
+      // Disconnect WebSocket
+      wsClient.disconnect()
     }
   }
 }
