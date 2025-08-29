@@ -61,19 +61,7 @@
 
     <!-- Charts Section -->
     <v-row class="mt-4">
-      <v-col cols="12" md="6">
-        <v-card>
-          <v-card-title>
-            <v-icon left>mdi-chart-donut</v-icon>
-            Endpoint Status Distribution
-          </v-card-title>
-          <v-card-text>
-            <EndpointStatusChart ref="statusChart" :endpoints="endpoints" />
-          </v-card-text>
-        </v-card>
-      </v-col>
-      
-      <v-col cols="12" md="6">
+      <v-col cols="12">
         <v-card>
           <v-card-title>
             <v-icon left>mdi-chart-line</v-icon>
@@ -559,7 +547,6 @@
 
 <script>
 import axios from 'axios'
-import EndpointStatusChart from '@/components/EndpointStatusChart.vue'
 import ResponseTimeChart from '@/components/ResponseTimeChart.vue'
 import { wsClient } from '@/services/websocket.js'
 
@@ -568,7 +555,6 @@ const API_BASE = import.meta.env.DEV ? '/api/v1' : 'http://localhost:8080/api/v1
 export default {
   name: 'Dashboard',
   components: {
-    EndpointStatusChart,
     ResponseTimeChart
   },
   
@@ -709,15 +695,27 @@ export default {
     }
   },
   
+  watch: {
+    endpoints: {
+      handler(newEndpoints) {
+        if (newEndpoints && newEndpoints.length > 0) {
+          // Only set if no endpoint is selected yet
+          if (!this.selectedChartEndpoint) {
+            this.selectedChartEndpoint = newEndpoints[0].id
+          }
+          // Ensure the selected endpoint exists in the current list
+          else if (!newEndpoints.find(ep => ep.id === this.selectedChartEndpoint)) {
+            this.selectedChartEndpoint = newEndpoints[0].id
+          }
+        }
+      },
+      immediate: true
+    }
+  },
+  
   mounted() {
     this.refreshData()
     this.fetchProxies()
-    // Set default chart endpoint after data loads
-    this.$nextTick(() => {
-      if (this.endpoints.length > 0) {
-        this.selectedChartEndpoint = this.endpoints[0].id
-      }
-    })
     
     // Setup WebSocket connection
     this.setupWebSocket()
@@ -734,11 +732,6 @@ export default {
       try {
         const response = await axios.get(`${API_BASE}/endpoints`)
         this.endpoints = response.data || []
-        
-        // Set default chart endpoint if not set
-        if (this.endpoints.length > 0 && !this.selectedChartEndpoint) {
-          this.selectedChartEndpoint = this.endpoints[0].id
-        }
       } catch (error) {
         this.showSnackbar('Failed to fetch endpoints', 'error')
         console.error(error)
@@ -954,7 +947,6 @@ export default {
         // Refresh endpoint list to get updated stats
         this.refreshData()
         // Trigger chart updates by emitting an event
-        this.$refs.statusChart?.updateChart()
         this.$refs.responseTimeChart?.updateChart()
       })
       
