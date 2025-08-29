@@ -719,18 +719,32 @@ func (m *Monitor) getEndpointLogs(c *gin.Context) {
 	minResponseTime := c.Query("min_response_time")
 	statusCode := c.Query("status_code")
 
+	// Debug logging
+	log.Printf("Getting logs for endpoint %d: limit=%s, offset=%s, start_date=%s, end_date=%s",
+		endpointID, limit, offset, startDate, endDate)
+
 	// Build WHERE clause dynamically
 	whereClause := "WHERE endpoint_id = $1"
 	args := []interface{}{endpointID}
 	argIndex := 2
 
-	// Add date filters
+	// Add date filters with validation
 	if startDate != "" {
+		// Try to parse the date to validate format
+		if _, err := time.Parse(time.RFC3339, startDate); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid start_date format. Use ISO 8601 format (e.g., 2023-01-01T00:00:00Z)"})
+			return
+		}
 		whereClause += fmt.Sprintf(" AND checked_at >= $%d", argIndex)
 		args = append(args, startDate)
 		argIndex++
 	}
 	if endDate != "" {
+		// Try to parse the date to validate format
+		if _, err := time.Parse(time.RFC3339, endDate); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid end_date format. Use ISO 8601 format (e.g., 2023-01-01T23:59:59Z)"})
+			return
+		}
 		whereClause += fmt.Sprintf(" AND checked_at <= $%d", argIndex)
 		args = append(args, endDate)
 		argIndex++
@@ -769,7 +783,7 @@ func (m *Monitor) getEndpointLogs(c *gin.Context) {
 		return
 	}
 
-	// Get paginated logs with filters
+	// Get paginated logs with filters - use optimized query
 	query := fmt.Sprintf(`
 		SELECT id, endpoint_id, status_code, response_time_ms, response_body, COALESCE(response_headers, ''), error_message, checked_at
 		FROM api_check_logs 
@@ -778,6 +792,10 @@ func (m *Monitor) getEndpointLogs(c *gin.Context) {
 		LIMIT $%d OFFSET $%d`, whereClause, argIndex, argIndex+1)
 
 	args = append(args, limit, offset)
+
+	// Log the final query for debugging
+	log.Printf("Executing query: %s with args: %v", query, args)
+
 	rows, err := m.db.Query(query, args...)
 
 	if err != nil {
@@ -800,10 +818,13 @@ func (m *Monitor) getEndpointLogs(c *gin.Context) {
 
 	// Return paginated response
 	c.JSON(200, gin.H{
-		"logs":   logs,
-		"total":  totalCount,
-		"limit":  limit,
-		"offset": offset,
+		"logs":       logs,
+		"total":      totalCount,
+		"limit":      limit,
+		"offset":     offset,
+		"start_date": startDate,
+		"end_date":   endDate,
+		"count":      len(logs),
 	})
 }
 

@@ -1,17 +1,34 @@
 <template>
-  <div style="height: 300px; position: relative;">
-    <div v-if="loading" class="d-flex align-center justify-center" style="height: 100%;">
-      <v-progress-circular indeterminate color="primary"></v-progress-circular>
+  <div style="position: relative;">
+    <!-- Period selector -->
+    <div class="d-flex justify-end mb-2">
+      <v-select
+        v-model="selectedPeriod"
+        :items="periodOptions"
+        item-title="text"
+        item-value="value"
+        label="Select period"
+        variant="outlined"
+        density="compact"
+        style="max-width: 150px;"
+        hide-details
+      />
     </div>
-    <Line
-      v-else-if="chartData.datasets.length > 0 && logs.length > 0"
-      :data="chartData"
-      :options="chartOptions"
-    />
-    <div v-else class="d-flex align-center justify-center" style="height: 100%;">
-      <v-alert type="info" variant="outlined">
-        Select an endpoint to view response time trends
-      </v-alert>
+    
+    <div style="height: 300px; position: relative;">
+      <div v-if="loading" class="d-flex align-center justify-center" style="height: 100%;">
+        <v-progress-circular indeterminate color="primary"></v-progress-circular>
+      </div>
+      <Line
+        v-else-if="chartData.datasets.length > 0 && logs.length > 0"
+        :data="chartData"
+        :options="chartOptions"
+      />
+      <div v-else class="d-flex align-center justify-center" style="height: 100%;">
+        <v-alert type="info" variant="outlined">
+          Select an endpoint to view response time trends
+        </v-alert>
+      </div>
     </div>
   </div>
 </template>
@@ -56,7 +73,15 @@ export default {
   data() {
     return {
       logs: [],
-      loading: false
+      loading: false,
+      selectedPeriod: '1h',
+      periodOptions: [
+        { text: '1 hour', value: '1h' },
+        { text: '6 hours', value: '6h' },
+        { text: '24 hours', value: '24h' },
+        { text: '7 days', value: '7d' },
+        { text: '14 days', value: '14d' }
+      ]
     }
   },
   computed: {
@@ -65,16 +90,35 @@ export default {
         return { labels: [], datasets: [] }
       }
       
-      // Get last 20 logs, sorted by time
+      // Sort logs by time
       const sortedLogs = [...this.logs]
         .sort((a, b) => new Date(a.checked_at) - new Date(b.checked_at))
-        .slice(-20)
       
-      const labels = sortedLogs.map(log => 
-        new Date(log.checked_at).toLocaleTimeString()
-      )
+      // Limit data points based on period for better performance
+      const maxPoints = this.selectedPeriod === '1h' ? 60 : 
+                      this.selectedPeriod === '6h' ? 72 : 
+                      this.selectedPeriod === '24h' ? 48 : 100
       
-      const responseTimes = sortedLogs.map(log => log.response_time_ms || 0)
+      const displayLogs = sortedLogs.slice(-maxPoints)
+      
+      // Format time labels based on selected period
+      const labels = displayLogs.map(log => {
+        const date = new Date(log.checked_at)
+        
+        if (this.selectedPeriod === '1h' || this.selectedPeriod === '6h') {
+          // Show time only for short periods
+          return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        } else if (this.selectedPeriod === '24h') {
+          // Show time with AM/PM for 24h
+          return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        } else {
+          // Show date and time for longer periods
+          return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
+                 date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      })
+      
+      const responseTimes = displayLogs.map(log => log.response_time_ms || 0)
       
       return {
         labels,
@@ -137,6 +181,10 @@ export default {
     endpointId: {
       handler: 'fetchLogs',
       immediate: true
+    },
+    selectedPeriod: {
+      handler: 'fetchLogs',
+      immediate: false
     }
   },
   methods: {
@@ -148,7 +196,35 @@ export default {
       
       this.loading = true
       try {
-        const url = `${API_BASE}/endpoints/${this.endpointId}/logs?limit=50`
+        // Calculate date range based on selected period
+        const now = new Date()
+        const startDate = new Date()
+        
+        switch (this.selectedPeriod) {
+          case '1h':
+            startDate.setHours(now.getHours() - 1)
+            break
+          case '6h':
+            startDate.setHours(now.getHours() - 6)
+            break
+          case '24h':
+            startDate.setDate(now.getDate() - 1)
+            break
+          case '7d':
+            startDate.setDate(now.getDate() - 7)
+            break
+          case '14d':
+            startDate.setDate(now.getDate() - 14)
+            break
+          default:
+            startDate.setHours(now.getHours() - 1)
+        }
+        
+        // Format dates for API
+        const startISO = startDate.toISOString()
+        const endISO = now.toISOString()
+        
+        const url = `${API_BASE}/endpoints/${this.endpointId}/logs?start_date=${startISO}&end_date=${endISO}&limit=200`
         const response = await axios.get(url)
         this.logs = response.data.logs || response.data || []
         return Promise.resolve()
