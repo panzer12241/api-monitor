@@ -124,7 +124,7 @@
 import axios from 'axios'
 import { Refresh } from '@element-plus/icons-vue'
 
-const API_BASE = 'http://localhost:8080/api/v1'
+const API_BASE = import.meta.env.DEV ? '/api/v1' : 'http://localhost:8080/api/v1'
 
 export default {
   name: 'Dashboard',

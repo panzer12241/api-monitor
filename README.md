@@ -15,7 +15,7 @@
 ## Technology Stack
 
 - **Backend**: Go (Gin framework)
-- **Frontend**: Vue.js 3 + Element Plus
+- **Frontend**: Vue.js 3 + Element Plus + Vite + Bun
 - **Database**: PostgreSQL (configuration), Prometheus (metrics)
 - **Dashboard**: Grafana
 - **Scheduler**: Go goroutines with cron
@@ -93,6 +93,10 @@ api-monitor/
 
 ## Development
 
+### Prerequisites
+- Docker & Docker Compose
+- Bun (for frontend development)
+
 ### Backend Development
 
 ```bash
@@ -101,12 +105,19 @@ go mod tidy
 go run main.go
 ```
 
-### Frontend Development
+### Frontend Development with Bun
 
 ```bash
+# Install Bun if not already installed
+curl -fsSL https://bun.sh/install | bash
+
+# Start frontend development server
+./dev-frontend.sh
+
+# Or manually:
 cd frontend
-npm install
-npm run serve
+bun install
+bun run dev
 ```
 
 ### Database Schema
