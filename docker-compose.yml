@@ -36,24 +36,6 @@ services:
     networks:
       - api-monitor-network
 
-  # Grafana Dashboard
-  grafana:
-    image: grafana/grafana:latest
-    container_name: api-monitor-grafana
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin123
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
-    depends_on:
-      - prometheus
-    networks:
-      - api-monitor-network
-
   # Go Backend API
   api-monitor-backend:
     build:
@@ -92,7 +74,6 @@ services:
 volumes:
   postgres_data:
   prometheus_data:
-  grafana_data:
 
 networks:
   api-monitor-network:

@@ -59,6 +59,45 @@
       </v-col>
     </v-row>
 
+    <!-- Charts Section -->
+    <v-row class="mt-4">
+      <v-col cols="12" md="6">
+        <v-card>
+          <v-card-title>
+            <v-icon left>mdi-chart-donut</v-icon>
+            Endpoint Status Distribution
+          </v-card-title>
+          <v-card-text>
+            <EndpointStatusChart :endpoints="endpoints" />
+          </v-card-text>
+        </v-card>
+      </v-col>
+      
+      <v-col cols="12" md="6">
+        <v-card>
+          <v-card-title>
+            <v-icon left>mdi-chart-line</v-icon>
+            Response Time Trends
+          </v-card-title>
+          <v-card-text>
+            <ResponseTimeChart :endpoint-id="selectedChartEndpoint" />
+          </v-card-text>
+          <v-card-actions>
+            <v-select
+              v-model="selectedChartEndpoint"
+              :items="endpointOptions"
+              item-title="name"
+              item-value="id"
+              label="Select Endpoint"
+              dense
+              outlined
+              class="mx-3"
+            ></v-select>
+          </v-card-actions>
+        </v-card>
+      </v-col>
+    </v-row>
+
     <!-- Endpoints Management -->
     <v-row class="mt-4">
       <v-col cols="12">
@@ -363,11 +402,17 @@
 
 <script>
 import axios from 'axios'
+import EndpointStatusChart from '@/components/EndpointStatusChart.vue'
+import ResponseTimeChart from '@/components/ResponseTimeChart.vue'
 
 const API_BASE = import.meta.env.DEV ? '/api/v1' : 'http://localhost:8080/api/v1'
 
 export default {
   name: 'Dashboard',
+  components: {
+    EndpointStatusChart,
+    ResponseTimeChart
+  },
   
   data() {
     return {
@@ -429,7 +474,10 @@ export default {
         { title: 'Interval', key: 'check_interval_seconds', sortable: true },
         { title: 'Timeout', key: 'timeout_seconds', sortable: true },
         { title: 'Actions', key: 'actions', sortable: false }
-      ]
+      ],
+      
+      // Chart data
+      selectedChartEndpoint: null
     }
   },
   
@@ -450,11 +498,24 @@ export default {
     
     unhealthyEndpoints() {
       return this.totalEndpoints - this.healthyEndpoints
+    },
+    
+    endpointOptions() {
+      return this.endpoints.map(endpoint => ({
+        id: endpoint.id,
+        name: endpoint.url
+      }))
     }
   },
   
   mounted() {
     this.refreshData()
+    // Set default chart endpoint after data loads
+    this.$nextTick(() => {
+      if (this.endpoints.length > 0) {
+        this.selectedChartEndpoint = this.endpoints[0].id
+      }
+    })
   },
   
   methods: {
@@ -463,6 +524,11 @@ export default {
       try {
         const response = await axios.get(`${API_BASE}/endpoints`)
         this.endpoints = response.data || []
+        
+        // Set default chart endpoint if not set
+        if (this.endpoints.length > 0 && !this.selectedChartEndpoint) {
+          this.selectedChartEndpoint = this.endpoints[0].id
+        }
       } catch (error) {
         this.showSnackbar('Failed to fetch endpoints', 'error')
         console.error(error)
