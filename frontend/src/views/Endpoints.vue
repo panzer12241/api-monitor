@@ -1,168 +1,271 @@
 <template>
-  <div class="endpoints">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <span>API Endpoints Management</span>
-          <el-button type="primary" @click="showCreateDialog">
-            <el-icon><Plus /></el-icon>
-            Add Endpoint
-          </el-button>
-        </div>
-      </template>
-      
-      <el-table :data="endpoints" style="width: 100%">
-        <el-table-column prop="name" label="Name" width="200" />
-        <el-table-column prop="url" label="URL" show-overflow-tooltip />
-        <el-table-column prop="method" label="Method" width="100" />
-        <el-table-column label="Status" width="120">
-          <template #default="scope">
-            <el-switch
-              v-model="scope.row.is_active"
-              @change="toggleEndpoint(scope.row)"
-              active-text="Active"
-              inactive-text="Inactive"
-            />
-          </template>
-        </el-table-column>
-        <el-table-column prop="check_interval_seconds" label="Interval" width="100">
-          <template #default="scope">
-            {{ scope.row.check_interval_seconds }}s
-          </template>
-        </el-table-column>
-        <el-table-column prop="timeout_seconds" label="Timeout" width="100">
-          <template #default="scope">
-            {{ scope.row.timeout_seconds }}s
-          </template>
-        </el-table-column>
-        <el-table-column label="Actions" width="200">
-          <template #default="scope">
-            <el-button size="small" @click="editEndpoint(scope.row)">
-              <el-icon><Edit /></el-icon>
-              Edit
-            </el-button>
-            <el-button 
-              size="small" 
-              type="danger" 
-              @click="deleteEndpoint(scope.row)"
-            >
-              <el-icon><Delete /></el-icon>
-              Delete
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+  <v-container fluid>
+    <v-row>
+      <v-col cols="12">
+        <v-card>
+          <v-card-title>
+            <v-icon left>mdi-api</v-icon>
+            API Endpoints Management
+            
+            <v-spacer></v-spacer>
+            
+            <v-btn color="primary" @click="showCreateDialog">
+              <v-icon left>mdi-plus</v-icon>
+              Add Endpoint
+            </v-btn>
+          </v-card-title>
+          
+          <v-data-table
+            :headers="headers"
+            :items="endpoints"
+            :loading="loading"
+            class="elevation-1"
+          >
+            <template v-slot:item.status="{ item }">
+              <v-switch
+                v-model="item.is_active"
+                @update:model-value="toggleEndpoint(item)"
+                color="success"
+                hide-details
+              ></v-switch>
+            </template>
+            
+            <template v-slot:item.check_interval_seconds="{ item }">
+              {{ item.check_interval_seconds }}s
+            </template>
+            
+            <template v-slot:item.timeout_seconds="{ item }">
+              {{ item.timeout_seconds }}s
+            </template>
+            
+            <template v-slot:item.actions="{ item }">
+              <v-btn
+                size="small"
+                color="primary"
+                @click="editEndpoint(item)"
+                class="mr-2"
+              >
+                <v-icon left small>mdi-pencil</v-icon>
+                Edit
+              </v-btn>
+              
+              <v-btn
+                size="small"
+                color="error"
+                @click="deleteEndpoint(item)"
+              >
+                <v-icon left small>mdi-delete</v-icon>
+                Delete
+              </v-btn>
+            </template>
+          </v-data-table>
+        </v-card>
+      </v-col>
+    </v-row>
 
     <!-- Create/Edit Dialog -->
-    <el-dialog 
-      v-model="dialogVisible" 
-      :title="isEditMode ? 'Edit Endpoint' : 'Create Endpoint'"
-      width="600px"
-    >
-      <el-form :model="endpointForm" label-width="140px">
-        <el-form-item label="Name" required>
-          <el-input v-model="endpointForm.name" placeholder="Enter endpoint name" />
-        </el-form-item>
+    <v-dialog v-model="dialog" max-width="800px" persistent>
+      <v-card>
+        <v-card-title>
+          <span class="text-h5">
+            <v-icon left>{{ isEditMode ? 'mdi-pencil' : 'mdi-plus' }}</v-icon>
+            {{ isEditMode ? 'Edit Endpoint' : 'Create Endpoint' }}
+          </span>
+        </v-card-title>
         
-        <el-form-item label="URL" required>
-          <el-input v-model="endpointForm.url" placeholder="https://api.example.com/health" />
-        </el-form-item>
+        <v-card-text>
+          <v-form ref="endpointForm" v-model="valid">
+            <v-text-field
+              v-model="endpointForm.name"
+              label="Name"
+              :rules="nameRules"
+              required
+              outlined
+            ></v-text-field>
+            
+            <v-text-field
+              v-model="endpointForm.url"
+              label="URL"
+              :rules="urlRules"
+              required
+              outlined
+              placeholder="https://api.example.com/health"
+            ></v-text-field>
+            
+            <v-select
+              v-model="endpointForm.method"
+              :items="httpMethods"
+              label="Method"
+              outlined
+            ></v-select>
+            
+            <v-row>
+              <v-col cols="6">
+                <v-text-field
+                  v-model.number="endpointForm.check_interval_seconds"
+                  label="Check Interval (seconds)"
+                  type="number"
+                  :min="10"
+                  :max="3600"
+                  outlined
+                ></v-text-field>
+              </v-col>
+              
+              <v-col cols="6">
+                <v-text-field
+                  v-model.number="endpointForm.timeout_seconds"
+                  label="Timeout (seconds)"
+                  type="number"
+                  :min="5"
+                  :max="300"
+                  outlined
+                ></v-text-field>
+              </v-col>
+            </v-row>
+            
+            <!-- Headers Section -->
+            <v-card outlined class="mb-4">
+              <v-card-subtitle>
+                <v-icon left small>mdi-code-tags</v-icon>
+                HTTP Headers
+              </v-card-subtitle>
+              
+              <v-card-text>
+                <div v-for="(header, index) in headers" :key="index" class="mb-2">
+                  <v-row>
+                    <v-col cols="5">
+                      <v-text-field
+                        v-model="header.key"
+                        label="Header name"
+                        outlined
+                        dense
+                      ></v-text-field>
+                    </v-col>
+                    <v-col cols="5">
+                      <v-text-field
+                        v-model="header.value"
+                        label="Header value"
+                        outlined
+                        dense
+                      ></v-text-field>
+                    </v-col>
+                    <v-col cols="2">
+                      <v-btn
+                        color="error"
+                        icon
+                        @click="removeHeader(index)"
+                      >
+                        <v-icon>mdi-delete</v-icon>
+                      </v-btn>
+                    </v-col>
+                  </v-row>
+                </div>
+                
+                <v-btn color="primary" outlined @click="addHeader">
+                  <v-icon left>mdi-plus</v-icon>
+                  Add Header
+                </v-btn>
+              </v-card-text>
+            </v-card>
+            
+            <v-textarea
+              v-model="endpointForm.body"
+              label="Request Body"
+              outlined
+              rows="4"
+              placeholder="JSON request body (for POST/PUT requests)"
+            ></v-textarea>
+            
+            <v-switch
+              v-model="endpointForm.is_active"
+              label="Active"
+              color="success"
+            ></v-switch>
+          </v-form>
+        </v-card-text>
         
-        <el-form-item label="Method">
-          <el-select v-model="endpointForm.method">
-            <el-option label="GET" value="GET" />
-            <el-option label="POST" value="POST" />
-            <el-option label="PUT" value="PUT" />
-            <el-option label="DELETE" value="DELETE" />
-            <el-option label="PATCH" value="PATCH" />
-            <el-option label="HEAD" value="HEAD" />
-          </el-select>
-        </el-form-item>
-        
-        <el-form-item label="Check Interval">
-          <el-input-number 
-            v-model="endpointForm.check_interval_seconds"
-            :min="10"
-            :max="3600"
-            controls-position="right"
-          />
-          <span style="margin-left: 10px;">seconds</span>
-        </el-form-item>
-        
-        <el-form-item label="Timeout">
-          <el-input-number 
-            v-model="endpointForm.timeout_seconds"
-            :min="5"
-            :max="300"
-            controls-position="right"
-          />
-          <span style="margin-left: 10px;">seconds</span>
-        </el-form-item>
-        
-        <el-form-item label="Headers">
-          <div v-for="(header, index) in headers" :key="index" style="margin-bottom: 10px;">
-            <el-row :gutter="10">
-              <el-col :span="10">
-                <el-input v-model="header.key" placeholder="Header name" />
-              </el-col>
-              <el-col :span="10">
-                <el-input v-model="header.value" placeholder="Header value" />
-              </el-col>
-              <el-col :span="4">
-                <el-button type="danger" @click="removeHeader(index)">
-                  <el-icon><Delete /></el-icon>
-                </el-button>
-              </el-col>
-            </el-row>
-          </div>
-          <el-button @click="addHeader">Add Header</el-button>
-        </el-form-item>
-        
-        <el-form-item label="Request Body">
-          <el-input 
-            v-model="endpointForm.body"
-            type="textarea"
-            :rows="4"
-            placeholder="JSON request body (for POST/PUT requests)"
-          />
-        </el-form-item>
-        
-        <el-form-item label="Active">
-          <el-switch v-model="endpointForm.is_active" />
-        </el-form-item>
-      </el-form>
-      
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="dialogVisible = false">Cancel</el-button>
-          <el-button type="primary" @click="saveEndpoint">
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn text @click="dialog = false">Cancel</v-btn>
+          <v-btn 
+            color="primary" 
+            @click="saveEndpoint"
+            :disabled="!valid"
+            :loading="saving"
+          >
             {{ isEditMode ? 'Update' : 'Create' }}
-          </el-button>
-        </span>
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Delete Confirmation Dialog -->
+    <v-dialog v-model="deleteDialog" max-width="400px">
+      <v-card>
+        <v-card-title>
+          <v-icon left color="error">mdi-delete</v-icon>
+          Confirm Delete
+        </v-card-title>
+        
+        <v-card-text>
+          Are you sure you want to delete the endpoint "{{ deletingEndpoint?.name }}"?
+          This action cannot be undone.
+        </v-card-text>
+        
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn text @click="deleteDialog = false">Cancel</v-btn>
+          <v-btn 
+            color="error" 
+            @click="confirmDelete"
+            :loading="deleting"
+          >
+            Delete
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Snackbar for notifications -->
+    <v-snackbar
+      v-model="snackbar"
+      :color="snackbarColor"
+      :timeout="3000"
+      top
+    >
+      {{ snackbarText }}
+      <template v-slot:actions>
+        <v-btn color="white" variant="text" @click="snackbar = false">
+          Close
+        </v-btn>
       </template>
-    </el-dialog>
-  </div>
+    </v-snackbar>
+  </v-container>
 </template>
 
 <script>
 import axios from 'axios'
-import { Plus, Edit, Delete } from '@element-plus/icons-vue'
 
 const API_BASE = import.meta.env.DEV ? '/api/v1' : 'http://localhost:8080/api/v1'
 
 export default {
-  name: 'Endpoints',
-  components: {
-    Plus,
-    Edit,
-    Delete
-  },
+  name: 'EndpointsView',
+  
   data() {
     return {
       endpoints: [],
-      dialogVisible: false,
+      dialog: false,
+      deleteDialog: false,
       isEditMode: false,
+      loading: false,
+      saving: false,
+      deleting: false,
+      valid: false,
+      snackbar: false,
+      snackbarText: '',
+      snackbarColor: 'success',
+      deletingEndpoint: null,
+      
       endpointForm: {
         id: null,
         name: '',
@@ -174,37 +277,81 @@ export default {
         check_interval_seconds: 60,
         is_active: true
       },
-      headers: []
+      
+      headers: [],
+      httpMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD'],
+      
+      nameRules: [
+        v => !!v || 'Name is required',
+        v => v.length >= 3 || 'Name must be at least 3 characters'
+      ],
+      
+      urlRules: [
+        v => !!v || 'URL is required',
+        v => {
+          try {
+            new URL(v)
+            return true
+          } catch {
+            return 'Please enter a valid URL'
+          }
+        }
+      ],
+      
+      tableHeaders: [
+        { title: 'Name', key: 'name', sortable: true },
+        { title: 'URL', key: 'url', sortable: false },
+        { title: 'Method', key: 'method', sortable: true },
+        { title: 'Status', key: 'status', sortable: false },
+        { title: 'Interval', key: 'check_interval_seconds', sortable: true },
+        { title: 'Timeout', key: 'timeout_seconds', sortable: true },
+        { title: 'Actions', key: 'actions', sortable: false }
+      ]
     }
   },
+  
+  computed: {
+    headers() {
+      return this.tableHeaders
+    }
+  },
+  
   mounted() {
     this.fetchEndpoints()
   },
+  
   methods: {
     async fetchEndpoints() {
+      this.loading = true
       try {
         const response = await axios.get(`${API_BASE}/endpoints`)
         this.endpoints = response.data || []
       } catch (error) {
-        this.$message.error('Failed to fetch endpoints')
+        this.showSnackbar('Failed to fetch endpoints', 'error')
         console.error(error)
+      } finally {
+        this.loading = false
       }
     },
     
     showCreateDialog() {
       this.resetForm()
       this.isEditMode = false
-      this.dialogVisible = true
+      this.dialog = true
     },
     
     editEndpoint(endpoint) {
       this.endpointForm = { ...endpoint }
       this.headers = Object.entries(endpoint.headers || {}).map(([key, value]) => ({ key, value }))
       this.isEditMode = true
-      this.dialogVisible = true
+      this.dialog = true
     },
     
     async saveEndpoint() {
+      if (!this.valid) return
+      
+      this.saving = true
+      
       // Convert headers array to object
       this.endpointForm.headers = {}
       this.headers.forEach(header => {
@@ -216,48 +363,52 @@ export default {
       try {
         if (this.isEditMode) {
           await axios.put(`${API_BASE}/endpoints/${this.endpointForm.id}`, this.endpointForm)
-          this.$message.success('Endpoint updated successfully')
+          this.showSnackbar('Endpoint updated successfully', 'success')
         } else {
           await axios.post(`${API_BASE}/endpoints`, this.endpointForm)
-          this.$message.success('Endpoint created successfully')
+          this.showSnackbar('Endpoint created successfully', 'success')
         }
         
-        this.dialogVisible = false
+        this.dialog = false
         this.fetchEndpoints()
       } catch (error) {
-        this.$message.error('Failed to save endpoint')
+        this.showSnackbar('Failed to save endpoint', 'error')
         console.error(error)
+      } finally {
+        this.saving = false
       }
     },
     
     async toggleEndpoint(endpoint) {
       try {
         await axios.post(`${API_BASE}/endpoints/${endpoint.id}/toggle`)
-        this.$message.success(`Endpoint ${endpoint.is_active ? 'activated' : 'deactivated'}`)
+        this.showSnackbar(`Endpoint ${endpoint.is_active ? 'activated' : 'deactivated'}`, 'success')
       } catch (error) {
-        this.$message.error('Failed to toggle endpoint')
+        this.showSnackbar('Failed to toggle endpoint', 'error')
         // Revert the switch
         endpoint.is_active = !endpoint.is_active
         console.error(error)
       }
     },
     
-    async deleteEndpoint(endpoint) {
+    deleteEndpoint(endpoint) {
+      this.deletingEndpoint = endpoint
+      this.deleteDialog = true
+    },
+    
+    async confirmDelete() {
+      this.deleting = true
+      
       try {
-        await this.$confirm('Are you sure you want to delete this endpoint?', 'Warning', {
-          confirmButtonText: 'Delete',
-          cancelButtonText: 'Cancel',
-          type: 'warning'
-        })
-        
-        await axios.delete(`${API_BASE}/endpoints/${endpoint.id}`)
-        this.$message.success('Endpoint deleted successfully')
+        await axios.delete(`${API_BASE}/endpoints/${this.deletingEndpoint.id}`)
+        this.showSnackbar('Endpoint deleted successfully', 'success')
+        this.deleteDialog = false
         this.fetchEndpoints()
       } catch (error) {
-        if (error !== 'cancel') {
-          this.$message.error('Failed to delete endpoint')
-          console.error(error)
-        }
+        this.showSnackbar('Failed to delete endpoint', 'error')
+        console.error(error)
+      } finally {
+        this.deleting = false
       }
     },
     
@@ -282,23 +433,13 @@ export default {
     
     removeHeader(index) {
       this.headers.splice(index, 1)
+    },
+    
+    showSnackbar(text, color = 'success') {
+      this.snackbarText = text
+      this.snackbarColor = color
+      this.snackbar = true
     }
   }
 }
 </script>
-
-<style scoped>
-.endpoints {
-  padding: 20px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.dialog-footer {
-  text-align: right;
-}
-</style>

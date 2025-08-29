@@ -1,145 +1,231 @@
 <template>
-  <div class="dashboard">
-    <el-row :gutter="20">
-      <el-col :span="6">
-        <el-card class="stats-card">
-          <div class="stat-content">
-            <div class="stat-number">{{ totalEndpoints }}</div>
-            <div class="stat-label">Total Endpoints</div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card class="stats-card">
-          <div class="stat-content">
-            <div class="stat-number">{{ activeEndpoints }}</div>
-            <div class="stat-label">Active Endpoints</div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card class="stats-card">
-          <div class="stat-content">
-            <div class="stat-number">{{ healthyEndpoints }}</div>
-            <div class="stat-label">Healthy Endpoints</div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card class="stats-card">
-          <div class="stat-content">
-            <div class="stat-number">{{ unhealthyEndpoints }}</div>
-            <div class="stat-label">Unhealthy Endpoints</div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <el-row :gutter="20" style="margin-top: 20px;">
-      <el-col :span="24">
-        <el-card>
-          <template #header>
-            <div class="card-header">
-              <span>Endpoints Status</span>
-              <el-button type="primary" @click="refreshData">
-                <el-icon><Refresh /></el-icon>
-                Refresh
-              </el-button>
+  <v-container fluid>
+    <!-- Stats Cards -->
+    <v-row>
+      <v-col cols="12" sm="6" md="3">
+        <v-card color="primary" dark>
+          <v-card-text>
+            <div class="d-flex align-center">
+              <v-icon size="40" class="mr-4">mdi-api</v-icon>
+              <div>
+                <div class="text-h4 font-weight-bold">{{ totalEndpoints }}</div>
+                <div class="text-subtitle1">Total Endpoints</div>
+              </div>
             </div>
-          </template>
+          </v-card-text>
+        </v-card>
+      </v-col>
+      
+      <v-col cols="12" sm="6" md="3">
+        <v-card color="success" dark>
+          <v-card-text>
+            <div class="d-flex align-center">
+              <v-icon size="40" class="mr-4">mdi-play-circle</v-icon>
+              <div>
+                <div class="text-h4 font-weight-bold">{{ activeEndpoints }}</div>
+                <div class="text-subtitle1">Active Endpoints</div>
+              </div>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+      
+      <v-col cols="12" sm="6" md="3">
+        <v-card color="info" dark>
+          <v-card-text>
+            <div class="d-flex align-center">
+              <v-icon size="40" class="mr-4">mdi-check-circle</v-icon>
+              <div>
+                <div class="text-h4 font-weight-bold">{{ healthyEndpoints }}</div>
+                <div class="text-subtitle1">Healthy Endpoints</div>
+              </div>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+      
+      <v-col cols="12" sm="6" md="3">
+        <v-card color="error" dark>
+          <v-card-text>
+            <div class="d-flex align-center">
+              <v-icon size="40" class="mr-4">mdi-alert-circle</v-icon>
+              <div>
+                <div class="text-h4 font-weight-bold">{{ unhealthyEndpoints }}</div>
+                <div class="text-subtitle1">Unhealthy Endpoints</div>
+              </div>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <!-- Endpoints Status Table -->
+    <v-row class="mt-4">
+      <v-col cols="12">
+        <v-card>
+          <v-card-title>
+            <v-icon left>mdi-monitor-dashboard</v-icon>
+            Endpoints Status
+            
+            <v-spacer></v-spacer>
+            
+            <v-btn color="primary" @click="refreshData" :loading="loading">
+              <v-icon left>mdi-refresh</v-icon>
+              Refresh
+            </v-btn>
+          </v-card-title>
           
-          <el-table :data="endpoints" style="width: 100%">
-            <el-table-column prop="name" label="Name" width="200" />
-            <el-table-column prop="url" label="URL" show-overflow-tooltip />
-            <el-table-column prop="method" label="Method" width="80" />
-            <el-table-column label="Status" width="100">
-              <template #default="scope">
-                <el-tag :type="scope.row.is_active ? 'success' : 'info'">
-                  {{ scope.row.is_active ? 'Active' : 'Inactive' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="check_interval_seconds" label="Interval" width="100">
-              <template #default="scope">
-                {{ scope.row.check_interval_seconds }}s
-              </template>
-            </el-table-column>
-            <el-table-column label="Actions" width="200">
-              <template #default="scope">
-                <el-button 
-                  size="small" 
-                  @click="manualCheck(scope.row.id)"
-                  :loading="checkingEndpoints.includes(scope.row.id)"
-                >
-                  Check Now
-                </el-button>
-                <el-button 
-                  size="small" 
-                  @click="viewLogs(scope.row)"
-                >
-                  View Logs
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-col>
-    </el-row>
+          <v-data-table
+            :headers="headers"
+            :items="endpoints"
+            :loading="loading"
+            class="elevation-1"
+          >
+            <template v-slot:item.status="{ item }">
+              <v-chip
+                :color="item.is_active ? 'success' : 'default'"
+                text-color="white"
+                small
+              >
+                <v-icon left small>
+                  {{ item.is_active ? 'mdi-check-circle' : 'mdi-pause-circle' }}
+                </v-icon>
+                {{ item.is_active ? 'Active' : 'Inactive' }}
+              </v-chip>
+            </template>
+            
+            <template v-slot:item.check_interval_seconds="{ item }">
+              {{ item.check_interval_seconds }}s
+            </template>
+            
+            <template v-slot:item.actions="{ item }">
+              <v-btn
+                size="small"
+                color="primary"
+                @click="manualCheck(item.id)"
+                :loading="checkingEndpoints.includes(item.id)"
+                class="mr-2"
+              >
+                <v-icon left small>mdi-play</v-icon>
+                Check Now
+              </v-btn>
+              
+              <v-btn
+                size="small"
+                color="info"
+                @click="viewLogs(item)"
+              >
+                <v-icon left small>mdi-file-document</v-icon>
+                View Logs
+              </v-btn>
+            </template>
+          </v-data-table>
+        </v-card>
+      </v-col>
+    </v-row>
 
     <!-- Logs Dialog -->
-    <el-dialog 
-      v-model="logsDialogVisible" 
-      :title="`Logs for ${selectedEndpoint?.name}`"
-      width="80%"
-    >
-      <el-table :data="logs" style="width: 100%">
-        <el-table-column prop="checked_at" label="Time" width="180">
-          <template #default="scope">
-            {{ formatDate(scope.row.checked_at) }}
+    <v-dialog v-model="logsDialog" max-width="1200px" scrollable>
+      <v-card>
+        <v-card-title>
+          <v-icon left>mdi-file-document</v-icon>
+          Logs for {{ selectedEndpoint?.name }}
+          
+          <v-spacer></v-spacer>
+          
+          <v-btn icon @click="logsDialog = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+        
+        <v-data-table
+          :headers="logHeaders"
+          :items="logs"
+          :loading="logsLoading"
+          class="elevation-1"
+          density="compact"
+        >
+          <template v-slot:item.checked_at="{ item }">
+            {{ formatDate(item.checked_at) }}
           </template>
-        </el-table-column>
-        <el-table-column prop="status_code" label="Status Code" width="120">
-          <template #default="scope">
-            <el-tag 
-              :type="getStatusType(scope.row.status_code)"
-              v-if="scope.row.status_code"
+          
+          <template v-slot:item.status_code="{ item }">
+            <v-chip
+              v-if="item.status_code"
+              :color="getStatusColor(item.status_code)"
+              text-color="white"
+              small
             >
-              {{ scope.row.status_code }}
-            </el-tag>
-            <el-tag type="danger" v-else>Error</el-tag>
+              {{ item.status_code }}
+            </v-chip>
+            <v-chip v-else color="error" text-color="white" small>
+              Error
+            </v-chip>
           </template>
-        </el-table-column>
-        <el-table-column prop="response_time_ms" label="Response Time" width="130">
-          <template #default="scope">
-            {{ scope.row.response_time_ms }}ms
+          
+          <template v-slot:item.response_time_ms="{ item }">
+            {{ item.response_time_ms }}ms
           </template>
-        </el-table-column>
-        <el-table-column prop="error_message" label="Error" show-overflow-tooltip />
-      </el-table>
-    </el-dialog>
-  </div>
+        </v-data-table>
+      </v-card>
+    </v-dialog>
+
+    <!-- Snackbar for notifications -->
+    <v-snackbar
+      v-model="snackbar"
+      :color="snackbarColor"
+      :timeout="3000"
+      top
+    >
+      {{ snackbarText }}
+      <template v-slot:actions>
+        <v-btn color="white" variant="text" @click="snackbar = false">
+          Close
+        </v-btn>
+      </template>
+    </v-snackbar>
+  </v-container>
 </template>
 
 <script>
 import axios from 'axios'
-import { Refresh } from '@element-plus/icons-vue'
 
 const API_BASE = import.meta.env.DEV ? '/api/v1' : 'http://localhost:8080/api/v1'
 
 export default {
-  name: 'Dashboard',
-  components: {
-    Refresh
-  },
+  name: 'DashboardView',
+  
   data() {
     return {
       endpoints: [],
       logs: [],
       selectedEndpoint: null,
-      logsDialogVisible: false,
-      checkingEndpoints: []
+      logsDialog: false,
+      checkingEndpoints: [],
+      loading: false,
+      logsLoading: false,
+      snackbar: false,
+      snackbarText: '',
+      snackbarColor: 'success',
+      
+      headers: [
+        { title: 'Name', key: 'name', sortable: true },
+        { title: 'URL', key: 'url', sortable: false },
+        { title: 'Method', key: 'method', sortable: true },
+        { title: 'Status', key: 'status', sortable: false },
+        { title: 'Interval', key: 'check_interval_seconds', sortable: true },
+        { title: 'Actions', key: 'actions', sortable: false }
+      ],
+      
+      logHeaders: [
+        { title: 'Time', key: 'checked_at', sortable: true },
+        { title: 'Status Code', key: 'status_code', sortable: true },
+        { title: 'Response Time', key: 'response_time_ms', sortable: true },
+        { title: 'Error', key: 'error_message', sortable: false }
+      ]
     }
   },
+  
   computed: {
     totalEndpoints() {
       return this.endpoints.length
@@ -155,86 +241,74 @@ export default {
       return this.activeEndpoints - this.healthyEndpoints
     }
   },
+  
   mounted() {
     this.fetchEndpoints()
   },
+  
   methods: {
     async fetchEndpoints() {
+      this.loading = true
       try {
         const response = await axios.get(`${API_BASE}/endpoints`)
         this.endpoints = response.data || []
       } catch (error) {
-        this.$message.error('Failed to fetch endpoints')
+        this.showSnackbar('Failed to fetch endpoints', 'error')
         console.error(error)
+      } finally {
+        this.loading = false
       }
     },
+    
     async manualCheck(endpointId) {
       this.checkingEndpoints.push(endpointId)
       try {
         await axios.post(`${API_BASE}/endpoints/${endpointId}/check`)
-        this.$message.success('Manual check initiated')
+        this.showSnackbar('Manual check initiated', 'success')
       } catch (error) {
-        this.$message.error('Failed to initiate check')
+        this.showSnackbar('Failed to initiate check', 'error')
         console.error(error)
       } finally {
         this.checkingEndpoints = this.checkingEndpoints.filter(id => id !== endpointId)
       }
     },
+    
     async viewLogs(endpoint) {
       this.selectedEndpoint = endpoint
+      this.logsLoading = true
+      this.logsDialog = true
+      
       try {
         const response = await axios.get(`${API_BASE}/endpoints/${endpoint.id}/logs?limit=50`)
         this.logs = response.data || []
-        this.logsDialogVisible = true
       } catch (error) {
-        this.$message.error('Failed to fetch logs')
+        this.showSnackbar('Failed to fetch logs', 'error')
         console.error(error)
+      } finally {
+        this.logsLoading = false
       }
     },
+    
     refreshData() {
       this.fetchEndpoints()
     },
+    
     formatDate(dateString) {
       return new Date(dateString).toLocaleString()
     },
-    getStatusType(statusCode) {
-      if (!statusCode) return 'danger'
+    
+    getStatusColor(statusCode) {
+      if (!statusCode) return 'error'
       if (statusCode >= 200 && statusCode < 300) return 'success'
       if (statusCode >= 300 && statusCode < 400) return 'warning'
-      return 'danger'
+      return 'error'
+    },
+    
+    showSnackbar(text, color = 'success') {
+      this.snackbarText = text
+      this.snackbarColor = color
+      this.snackbar = true
     }
   }
 }
 </script>
-
-<style scoped>
-.dashboard {
-  padding: 20px;
-}
-
-.stats-card {
-  text-align: center;
-}
-
-.stat-content {
-  padding: 20px;
-}
-
-.stat-number {
-  font-size: 2.5em;
-  font-weight: bold;
-  color: #409eff;
-  margin-bottom: 10px;
-}
-
-.stat-label {
-  font-size: 1.1em;
-  color: #666;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-</style>

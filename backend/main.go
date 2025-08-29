@@ -117,6 +117,9 @@ func main() {
 	// Prometheus metrics endpoint
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
+	// Authentication endpoint (no auth required)
+	r.POST("/api/v1/auth/login", monitor.login)
+
 	// API endpoints
 	api := r.Group("/api/v1")
 	{
@@ -531,4 +534,37 @@ func (m *Monitor) manualCheck(c *gin.Context) {
 	go m.checkEndpoint(endpoint)
 
 	c.JSON(200, gin.H{"message": "Manual check initiated"})
+}
+
+// Login endpoint for authentication
+func (m *Monitor) login(c *gin.Context) {
+	var credentials struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+
+	if err := c.ShouldBindJSON(&credentials); err != nil {
+		c.JSON(400, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	// Simple authentication (in production, use proper password hashing)
+	if credentials.Username == "admin" && credentials.Password == "admin123" {
+		token := fmt.Sprintf("demo-token-%d", time.Now().Unix())
+
+		c.JSON(200, gin.H{
+			"success": true,
+			"token":   token,
+			"user": gin.H{
+				"id":       1,
+				"username": credentials.Username,
+				"name":     "Administrator",
+			},
+		})
+	} else {
+		c.JSON(401, gin.H{
+			"success": false,
+			"error":   "Invalid credentials",
+		})
+	}
 }

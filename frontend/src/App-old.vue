@@ -53,12 +53,13 @@
       app
       temporary
     >
-      <v-list>
+      <v-list nav dense>
         <v-list-item
           v-for="item in menuItems"
           :key="item.title"
           :to="item.route"
-          link
+          router
+          exact
         >
           <v-list-item-icon>
             <v-icon>{{ item.icon }}</v-icon>
@@ -77,15 +78,14 @@
     <v-snackbar
       v-model="showSnackbar"
       :color="snackbarColor"
-      timeout="3000"
+      :timeout="3000"
       top
     >
       {{ snackbarMessage }}
-      <template v-slot:action="{ attrs }">
+      <template v-slot:actions>
         <v-btn
           color="white"
-          text
-          v-bind="attrs"
+          variant="text"
           @click="showSnackbar = false"
         >
           Close
