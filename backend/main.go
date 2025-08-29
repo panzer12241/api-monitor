@@ -715,8 +715,45 @@ func (m *Monitor) updateEndpoint(c *gin.Context) {
 	// Update scheduling
 	m.unscheduleEndpoint(endpointID)
 	if endpoint.IsActive {
-		endpoint.ID = endpointID
-		m.scheduleEndpoint(endpoint)
+		// Reload endpoint with proxy data from database
+		var updatedEndpoint APIEndpoint
+		var proxy Proxy
+		var headersJSON string
+		var proxyID sql.NullInt64
+		var proxyHost, proxyUsername, proxyPassword sql.NullString
+		var proxyPort sql.NullInt64
+
+		err = m.db.QueryRow(`
+			SELECT e.id, e.name, e.url, e.method, COALESCE(e.headers, '{}'), COALESCE(e.body, ''), 
+			       e.timeout_seconds, e.check_interval_seconds, e.proxy_id,
+			       p.host, p.port, p.username, p.password
+			FROM api_endpoints e
+			LEFT JOIN proxies p ON e.proxy_id = p.id AND p.is_active = true
+			WHERE e.id = $1`, endpointID).
+			Scan(&updatedEndpoint.ID, &updatedEndpoint.Name, &updatedEndpoint.URL, &updatedEndpoint.Method,
+				&headersJSON, &updatedEndpoint.Body, &updatedEndpoint.TimeoutSeconds,
+				&updatedEndpoint.CheckIntervalSeconds, &proxyID,
+				&proxyHost, &proxyPort, &proxyUsername, &proxyPassword)
+
+		if err == nil {
+			json.Unmarshal([]byte(headersJSON), &updatedEndpoint.Headers)
+
+			// Set proxy data if available
+			if proxyID.Valid {
+				updatedEndpoint.ProxyID = &[]int{int(proxyID.Int64)}[0]
+				if proxyHost.Valid {
+					proxy.Host = proxyHost.String
+					proxy.Port = int(proxyPort.Int64)
+					proxy.Username = proxyUsername.String
+					proxy.Password = proxyPassword.String
+					updatedEndpoint.Proxy = &proxy
+				}
+			}
+
+			m.scheduleEndpoint(updatedEndpoint)
+		} else {
+			log.Printf("Error reloading endpoint for scheduling: %v", err)
+		}
 	}
 
 	c.JSON(200, gin.H{"message": "Endpoint updated successfully"})
