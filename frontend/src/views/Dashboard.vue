@@ -134,6 +134,19 @@
               ></v-switch>
             </template>
             
+            <template v-slot:item.proxy="{ item }">
+              <v-chip
+                v-if="item.proxy"
+                :color="item.proxy.is_active ? 'success' : 'warning'"
+                size="small"
+                variant="outlined"
+              >
+                <v-icon left size="small">mdi-server-network</v-icon>
+                {{ item.proxy.name }}
+              </v-chip>
+              <span v-else class="text-grey">No Proxy</span>
+            </template>
+            
             <template v-slot:item.check_interval_seconds="{ item }">
               {{ item.check_interval_seconds }}s
             </template>
@@ -189,6 +202,15 @@
         
         <v-card-text>
           <v-form ref="endpointForm" v-model="valid">
+            <v-text-field
+              v-model="endpointForm.name"
+              label="Name"
+              :rules="nameRules"
+              required
+              outlined
+              placeholder="My API Endpoint"
+            ></v-text-field>
+            
             <v-text-field
               v-model="endpointForm.url"
               label="URL"
@@ -607,6 +629,11 @@ export default {
       },
       
       // Validation rules
+      nameRules: [
+        v => !!v || 'Name is required',
+        v => (v && v.length >= 3) || 'Name must be at least 3 characters',
+        v => (v && v.length <= 100) || 'Name must be less than 100 characters'
+      ],
       urlRules: [
         v => !!v || 'URL is required',
         v => {
@@ -621,7 +648,9 @@ export default {
       
       // Table headers
       endpointHeaders: [
+        { title: 'Name', key: 'name', sortable: true },
         { title: 'URL', key: 'url', sortable: false },
+        { title: 'Proxy', key: 'proxy', sortable: false },
         { title: 'Status', key: 'status', sortable: false },
         { title: 'Interval', key: 'check_interval_seconds', sortable: true },
         { title: 'Timeout', key: 'timeout_seconds', sortable: true },
@@ -655,7 +684,7 @@ export default {
     endpointOptions() {
       return this.endpoints.map(endpoint => ({
         id: endpoint.id,
-        name: endpoint.url
+        name: endpoint.name || endpoint.url
       }))
     },
     
@@ -748,7 +777,6 @@ export default {
       
       const payload = {
         ...this.endpointForm,
-        name: this.endpointForm.url,
         method: 'GET',
         headers: {},
         body: ''
