@@ -37,10 +37,10 @@ docker-compose up -d
 
 ### 3. เข้าใช้งาน
 
-- **Web UI**: http://localhost:8081
+- **Web UI**: https://monitor.maxnano.app
+- **Backend API**: https://monitor-api.maxnano.app
 - **Grafana Dashboard**: http://localhost:3000 (admin/admin123)
 - **Prometheus**: http://localhost:9090
-- **Backend API**: http://localhost:8080
 
 ## Project Structure
 

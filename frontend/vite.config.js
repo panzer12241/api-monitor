@@ -13,8 +13,9 @@ export default defineConfig({
     host: '0.0.0.0',
     proxy: {
       '/api': {
-        target: 'http://api-monitor-backend:8080',
-        changeOrigin: true
+        target: 'https://monitor-api.maxnano.app',
+        changeOrigin: true,
+        secure: true
       }
     }
   },

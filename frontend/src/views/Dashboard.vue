@@ -564,7 +564,7 @@
 import axios from 'axios'
 import ResponseTimeChart from '@/components/ResponseTimeChart.vue'
 
-const API_BASE = import.meta.env.DEV ? '/api/v1' : 'http://localhost:8080/api/v1'
+const API_BASE = import.meta.env.DEV ? '/api/v1' : 'https://monitor-api.maxnano.app/api/v1'
 
 export default {
   name: 'Dashboard',

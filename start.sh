@@ -25,7 +25,7 @@ docker-compose exec -T postgres pg_isready -U postgres
 
 # Check Backend API
 echo "   Checking Backend API..."
-curl -f http://localhost:8080/metrics > /dev/null 2>&1
+curl -f -k https://monitor-api.maxnano.app/metrics > /dev/null 2>&1
 if [ $? -eq 0 ]; then
     echo "   ✅ Backend API is ready"
 else
@@ -34,7 +34,7 @@ fi
 
 # Check Frontend
 echo "   Checking Frontend..."
-curl -f http://localhost:8081 > /dev/null 2>&1
+curl -f -k https://monitor.maxnano.app > /dev/null 2>&1
 if [ $? -eq 0 ]; then
     echo "   ✅ Frontend is ready"
 else
@@ -63,10 +63,10 @@ echo ""
 echo "🎉 API Monitor is running!"
 echo ""
 echo "📱 Access URLs:"
-echo "   Frontend:   http://localhost:8081"
+echo "   Frontend:   https://monitor.maxnano.app"
+echo "   Backend:    https://monitor-api.maxnano.app"
 echo "   Grafana:    http://localhost:3000 (admin/admin123)"
 echo "   Prometheus: http://localhost:9090"
-echo "   Backend:    http://localhost:8080"
 echo ""
 echo "🛠️  Useful commands:"
 echo "   Stop:       docker-compose down"
