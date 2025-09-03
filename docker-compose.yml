@@ -2,35 +2,35 @@ services:
   # PostgreSQL Database for configurations
   postgres:
     image: postgres:15
-    container_name: api-monitor-postgres
+    container_name: ${POSTGRES_CONTAINER}
     environment:
-      POSTGRES_DB: api_monitor
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres123
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ${POSTGRES_VOLUME}:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
-      - api-monitor-network
+      - ${NETWORK_NAME}
 
   # Go Backend API
   api-monitor-backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: api-monitor-backend
+    container_name: ${BACKEND_CONTAINER}
     environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres123
-      - DB_NAME=api_monitor
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
     depends_on:
       - postgres
     networks:
-      - api-monitor-network
+      - ${NETWORK_NAME}
     restart: unless-stopped
 
   # Vue.js Frontend
@@ -38,14 +38,14 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: api-monitor-frontend
+    container_name: ${FRONTEND_CONTAINER}
     networks:
-      - api-monitor-network
+      - ${NETWORK_NAME}
 
   # Nginx Reverse Proxy with SSL
   nginx-proxy:
     image: nginx:latest
-    container_name: api-monitor-nginx
+    container_name: ${NGINX_CONTAINER}
     ports:
       - "80:80"
       - "443:443"
@@ -56,11 +56,11 @@ services:
       - api-monitor-frontend
       - api-monitor-backend
     networks:
-      - api-monitor-network
+      - ${NETWORK_NAME}
     restart: unless-stopped
 
 volumes:
-  postgres_data:
+  ${POSTGRES_VOLUME}:
 networks:
-  api-monitor-network:
+  ${NETWORK_NAME}:
     driver: bridge
