@@ -41,32 +41,12 @@ else
     echo "   ⚠️  Frontend is not ready yet"
 fi
 
-# Check Grafana
-echo "   Checking Grafana..."
-curl -f http://localhost:3000 > /dev/null 2>&1
-if [ $? -eq 0 ]; then
-    echo "   ✅ Grafana is ready"
-else
-    echo "   ⚠️  Grafana is not ready yet"
-fi
-
-# Check Prometheus
-echo "   Checking Prometheus..."
-curl -f http://localhost:9090 > /dev/null 2>&1
-if [ $? -eq 0 ]; then
-    echo "   ✅ Prometheus is ready"
-else
-    echo "   ⚠️  Prometheus is not ready yet"
-fi
-
 echo ""
 echo "🎉 API Monitor is running!"
 echo ""
 echo "📱 Access URLs:"
 echo "   Frontend:   https://monitor.maxnano.app"
 echo "   Backend:    https://monitor-api.maxnano.app"
-echo "   Grafana:    http://localhost:3000 (admin/admin123)"
-echo "   Prometheus: http://localhost:9090"
 echo ""
 echo "🛠️  Useful commands:"
 echo "   Stop:       docker-compose down"

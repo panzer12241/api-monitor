@@ -560,7 +560,7 @@ func (m *Monitor) deleteEndpoint(c *gin.Context) {
 		return
 	}
 
-	// Get endpoint info before deleting (for Prometheus cleanup)
+	// Get endpoint info before deleting
 	var endpoint APIEndpoint
 	err = m.db.QueryRow("SELECT id, name, url, method, timeout_seconds, check_interval_seconds, is_active, created_at, updated_at FROM api_endpoints WHERE id = $1", endpointID).Scan(
 		&endpoint.ID, &endpoint.Name, &endpoint.URL, &endpoint.Method,

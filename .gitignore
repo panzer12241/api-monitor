@@ -131,12 +131,6 @@ Thumbs.db
 *.swo
 *~
 
-# Prometheus data
-prometheus_data/
-
-# Grafana data
-grafana_data/
-
 # PostgreSQL data
 postgres_data/
 frontend/dist

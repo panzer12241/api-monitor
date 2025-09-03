@@ -8,16 +8,14 @@
 - ✅ กำหนดช่วงเวลาการตรวจสอบ (วินาที/นาที/ชั่วโมง)
 - ✅ เปิด/ปิดการตรวจสอบแต่ละ endpoint
 - ✅ ดู log ย้อนหลัง (status code, response time, error messages)
-- ✅ Prometheus metrics สำหรับ Grafana
-- ✅ Real-time dashboard ใน Grafana
+- ✅ Real-time dashboard
 - ✅ Dockerized deployment
 
 ## Technology Stack
 
 - **Backend**: Go (Gin framework)
 - **Frontend**: Vue.js 3 + Element Plus + Vite + Bun
-- **Database**: PostgreSQL (configuration), Prometheus (metrics)
-- **Dashboard**: Grafana
+- **Database**: PostgreSQL (configuration)
 - **Scheduler**: Go goroutines with cron
 - **Deployment**: Docker & Docker Compose
 
@@ -39,8 +37,6 @@ docker-compose up -d
 
 - **Web UI**: https://monitor.maxnano.app
 - **Backend API**: https://monitor-api.maxnano.app
-- **Grafana Dashboard**: http://localhost:3000 (admin/admin123)
-- **Prometheus**: http://localhost:9090
 
 ## Project Structure
 
@@ -59,12 +55,8 @@ api-monitor/
 │   │   └── main.js         # App entry point
 │   ├── Dockerfile          # Frontend Docker image
 │   └── package.json        # NPM dependencies
-├── grafana/                # Grafana configuration
-│   ├── provisioning/       # Auto-provisioning config
-│   └── dashboards/         # Dashboard definitions
 ├── docker/                 # Docker configurations
-│   ├── postgres/           # PostgreSQL init scripts
-│   └── prometheus/         # Prometheus config
+│   └── postgres/           # PostgreSQL init scripts
 └── docker-compose.yml      # Main orchestration file
 ```
 
@@ -78,9 +70,6 @@ api-monitor/
 - `POST /api/v1/endpoints/:id/toggle` - เปิด/ปิดการตรวจสอบ
 - `POST /api/v1/endpoints/:id/check` - ตรวจสอบ manual
 - `GET /api/v1/endpoints/:id/logs` - ดู logs
-
-### Metrics
-- `GET /metrics` - Prometheus metrics
 
 ## Environment Variables
 
@@ -138,7 +127,7 @@ CREATE TABLE api_endpoints (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Check logs (supplement to Prometheus)
+-- Check logs
 CREATE TABLE api_check_logs (
     id SERIAL PRIMARY KEY,
     endpoint_id INTEGER REFERENCES api_endpoints(id),
@@ -149,19 +138,6 @@ CREATE TABLE api_check_logs (
     checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
-
-## Prometheus Metrics
-
-- `api_endpoint_status` - Endpoint status (1=up, 0=down)
-- `api_endpoint_response_time_seconds` - Response time histogram
-
-## Grafana Dashboard
-
-Dashboard จะแสดง:
-- สถานะ endpoints แบบ real-time
-- Response time trends
-- Availability percentage
-- Response time distribution
 
 ## Configuration Examples
 
@@ -191,9 +167,7 @@ Dashboard จะแสดง:
 
 1. **Real-time Status**: ตรวจสอบสถานะ API แบบ real-time
 2. **Historical Data**: เก็บ logs ย้อนหลังใน PostgreSQL
-3. **Metrics**: Export ไปยัง Prometheus สำหรับ long-term storage
-4. **Alerting**: สามารถตั้ง alert rules ใน Grafana ได้
-5. **Custom Intervals**: กำหนดช่วงเวลาตรวจสอบแต่ละ endpoint ได้
+3. **Custom Intervals**: กำหนดช่วงเวลาตรวจสอบแต่ละ endpoint ได้
 
 ## Troubleshooting
 
