@@ -10,10 +10,10 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ${POSTGRES_VOLUME}:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
-      - ${NETWORK_NAME}
+      - api-monitor-network
 
   # Go Backend API
   api-monitor-backend:
@@ -30,7 +30,7 @@ services:
     depends_on:
       - postgres
     networks:
-      - ${NETWORK_NAME}
+      - api-monitor-network
     restart: unless-stopped
 
   # Vue.js Frontend
@@ -40,7 +40,7 @@ services:
       dockerfile: Dockerfile
     container_name: ${FRONTEND_CONTAINER}
     networks:
-      - ${NETWORK_NAME}
+      - api-monitor-network
 
   # Nginx Reverse Proxy with SSL
   nginx-proxy:
@@ -56,11 +56,11 @@ services:
       - api-monitor-frontend
       - api-monitor-backend
     networks:
-      - ${NETWORK_NAME}
+      - api-monitor-network
     restart: unless-stopped
 
 volumes:
-  ${POSTGRES_VOLUME}:
+  postgres_data:
 networks:
-  ${NETWORK_NAME}:
+  api-monitor-network:
     driver: bridge
