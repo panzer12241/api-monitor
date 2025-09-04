@@ -15,33 +15,34 @@ export const useAuthStore = defineStore('auth', {
   actions: {
     async login(credentials) {
       try {
-        // For demo purposes, we'll use simple validation
-        // In production, this should call your backend API
-        if (credentials.username === 'admin' && credentials.password === 'admin123') {
-          const token = 'demo-token-' + Date.now()
+        // Call the Go backend API
+        const response = await axios.post('http://localhost:8080/api/v1/auth/login', {
+          username: credentials.username,
+          password: credentials.password
+        })
+
+        if (response.data && response.data.token) {
+          const { token, user } = response.data
           
           this.isAuthenticated = true
-          this.user = {
-            id: 1,
-            username: credentials.username,
-            name: 'Administrator'
-          }
+          this.user = user
           this.token = token
           
           localStorage.setItem('api-monitor-token', token)
-          localStorage.setItem('api-monitor-user', JSON.stringify(this.user))
+          localStorage.setItem('api-monitor-user', JSON.stringify(user))
           
           // Set axios default header
           axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
           
           return { success: true }
         } else {
-          throw new Error('Invalid credentials')
+          throw new Error('Invalid response from server')
         }
       } catch (error) {
+        const errorMessage = error.response?.data?.error || error.message || 'Login failed'
         return { 
           success: false, 
-          error: error.message || 'Login failed' 
+          error: errorMessage
         }
       }
     },

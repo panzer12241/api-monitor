@@ -204,9 +204,7 @@
 </template>
 
 <script>
-import axios from 'axios'
-
-const API_BASE = import.meta.env.DEV ? '/api/v1' : 'https://monitor-api.maxnano.app/api/v1'
+import { proxiesAPI } from '@/services/api'
 
 export default {
   name: 'ProxyManagement',
@@ -259,7 +257,7 @@ export default {
     async fetchProxies() {
       this.loading = true
       try {
-        const response = await axios.get(`${API_BASE}/proxies`)
+        const response = await proxiesAPI.getAll()
         this.proxies = response.data || []
       } catch (error) {
         this.showSnackbar('Failed to fetch proxies', 'error')
@@ -304,10 +302,10 @@ export default {
       this.saving = true
       try {
         if (this.isEditMode) {
-          await axios.put(`${API_BASE}/proxies/${this.form.id}`, this.form)
+          await proxiesAPI.update(this.form.id, this.form)
           this.showSnackbar('Proxy updated successfully')
         } else {
-          await axios.post(`${API_BASE}/proxies`, this.form)
+          await proxiesAPI.create(this.form)
           this.showSnackbar('Proxy created successfully')
         }
         
@@ -329,7 +327,7 @@ export default {
     async confirmDelete() {
       this.deleting = true
       try {
-        await axios.delete(`${API_BASE}/proxies/${this.selectedProxy.id}`)
+        await proxiesAPI.delete(this.selectedProxy.id)
         this.showSnackbar('Proxy deleted successfully')
         this.deleteDialog = false
         this.fetchProxies()
@@ -343,8 +341,10 @@ export default {
     
     async toggleProxy(proxy) {
       try {
-        await axios.post(`${API_BASE}/proxies/${proxy.id}/toggle`)
+        await proxiesAPI.toggle(proxy.id)
         this.showSnackbar(`Proxy ${proxy.is_active ? 'deactivated' : 'activated'}`)
+        // Update local state
+        proxy.is_active = !proxy.is_active
         this.fetchProxies()
       } catch (error) {
         this.showSnackbar('Failed to toggle proxy status', 'error')

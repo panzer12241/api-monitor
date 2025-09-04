@@ -561,10 +561,8 @@
 </template>
 
 <script>
-import axios from 'axios'
+import { endpointsAPI, proxiesAPI } from '@/services/api'
 import ResponseTimeChart from '@/components/ResponseTimeChart.vue'
-
-const API_BASE = import.meta.env.DEV ? '/api/v1' : 'https://monitor-api.maxnano.app/api/v1'
 
 export default {
   name: 'Dashboard',
@@ -741,7 +739,7 @@ export default {
     async refreshData() {
       this.loading = true
       try {
-        const response = await axios.get(`${API_BASE}/endpoints`)
+        const response = await endpointsAPI.getAll()
         this.endpoints = response.data || []
       } catch (error) {
         this.showSnackbar('Failed to fetch endpoints', 'error')
@@ -753,7 +751,7 @@ export default {
     
     async fetchProxies() {
       try {
-        const response = await axios.get(`${API_BASE}/proxies`)
+        const response = await proxiesAPI.getAll()
         this.proxies = response.data || []
       } catch (error) {
         console.error('Failed to fetch proxies:', error)
@@ -788,10 +786,10 @@ export default {
       
       try {
         if (this.isEditMode) {
-          await axios.put(`${API_BASE}/endpoints/${this.endpointForm.id}`, payload)
+          await endpointsAPI.update(this.endpointForm.id, payload)
           this.showSnackbar('Endpoint updated successfully', 'success')
         } else {
-          await axios.post(`${API_BASE}/endpoints`, payload)
+          await endpointsAPI.create(payload)
           this.showSnackbar('Endpoint created successfully', 'success')
         }
         
@@ -807,11 +805,12 @@ export default {
     
     async toggleEndpoint(endpoint) {
       try {
-        await axios.post(`${API_BASE}/endpoints/${endpoint.id}/toggle`)
-        this.showSnackbar(`Endpoint ${endpoint.is_active ? 'activated' : 'deactivated'}`, 'success')
+        await endpointsAPI.toggle(endpoint.id)
+        this.showSnackbar(`Endpoint ${endpoint.is_active ? 'deactivated' : 'activated'}`, 'success')
+        // Update local state
+        endpoint.is_active = !endpoint.is_active
       } catch (error) {
         this.showSnackbar('Failed to toggle endpoint', 'error')
-        endpoint.is_active = !endpoint.is_active
         console.error(error)
       }
     },
@@ -825,7 +824,7 @@ export default {
       this.deleting = true
       
       try {
-        await axios.delete(`${API_BASE}/endpoints/${this.deletingEndpoint.id}`)
+        await endpointsAPI.delete(this.deletingEndpoint.id)
         this.showSnackbar('Endpoint deleted successfully', 'success')
         this.deleteDialog = false
         this.refreshData()
