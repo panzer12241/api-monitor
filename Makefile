@@ -12,14 +12,30 @@ NC = \033[0m # No Color
 
 .PHONY: dev help
 
-# Default target - Start development environment
+# Development targets (sequential execution - recommended)
 dev:
-	@echo "$(BLUE)🚀 Starting API Monitor Development Environment$(NC)"
-	@echo "$(YELLOW)Backend: http://localhost:8080$(NC)"
-	@echo "$(YELLOW)Frontend: http://localhost:3000$(NC)"
-	@echo "$(YELLOW)Press Ctrl+C to stop both services$(NC)"
-	@echo ""
-	@make -j2 dev-backend dev-frontend
+	@echo "$(GREEN)Starting development environment (sequential)...$(NC)"
+	@echo "🔄 Starting frontend first, then backend after delay..."
+	@$(MAKE) dev-frontend & 
+	@sleep 3
+	@$(MAKE) dev-backend
+
+# Development targets (parallel execution - for advanced users)
+dev-parallel:
+	@echo "$(GREEN)Starting development environment (parallel)...$(NC)"
+	@echo "⚠️  Warning: Backend logs may interfere with frontend startup"
+	@$(MAKE) -j2 dev-frontend dev-backend
+
+# Frontend development  
+dev-frontend:
+	@echo "$(GREEN)Starting Frontend (Vue.js)...$(NC)"
+	@cd $(FRONTEND_DIR) && \
+	if [ ! -d node_modules ]; then \
+		echo "📦 Installing frontend dependencies..."; \
+		bun install; \
+	fi && \
+	echo "🚀 Frontend starting..." && \
+	bun dev
 
 # Backend development
 dev-backend:
@@ -32,17 +48,6 @@ dev-backend:
 	fi && \
 	echo "🚀 Backend starting..." && \
 	go run main.go
-
-# Frontend development  
-dev-frontend:
-	@echo "$(GREEN)Starting Frontend (Vue.js)...$(NC)"
-	@cd $(FRONTEND_DIR) && \
-	if [ ! -d node_modules ]; then \
-		echo "📦 Installing frontend dependencies..."; \
-		npm install; \
-	fi && \
-	echo "🚀 Frontend starting..." && \
-	npm run dev
 
 # Help
 help:
