@@ -131,9 +131,9 @@ func main() {
 func connectDB() (*sql.DB, error) {
 	host := getEnv("DB_HOST", "localhost")
 	port := getEnv("DB_PORT", "5432")
-	user := getEnv("DB_USER", "postgres")
+	user := getEnv("DB_USERNAME", "postgres")
 	password := getEnv("DB_PASSWORD", "postgres123")
-	dbname := getEnv("DB_NAME", "api_monitor")
+	dbname := getEnv("DB_DATABASE", "api_monitor")
 
 	psqlInfo := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		host, port, user, password, dbname)
