@@ -27,6 +27,11 @@ func SetupRoutes(app *fiber.App, db *sql.DB, monitor *services.MonitorService) {
 	auth.Post("/login", authController.Login)
 	auth.Post("/register", authController.Register)
 
+	// Protected auth routes (require JWT)
+	authProtected := app.Group("/api/v1/auth")
+	authProtected.Use(middleware.JWTMiddleware())
+	authProtected.Post("/logout", authController.Logout)
+
 	// Protected API endpoints (require JWT)
 	api := app.Group("/api/v1", middleware.JWTMiddleware())
 	{

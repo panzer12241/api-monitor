@@ -9,7 +9,6 @@ import (
 type User struct {
 	ID        int       `json:"id" db:"id"`
 	Username  string    `json:"username" db:"username"`
-	Email     string    `json:"email" db:"email"`
 	Password  string    `json:"-" db:"password"` // Hide password in JSON
 	Role      string    `json:"role" db:"role"`
 	IsActive  bool      `json:"is_active" db:"is_active"`

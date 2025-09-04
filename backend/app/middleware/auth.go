@@ -38,7 +38,22 @@ func JWTMiddleware() fiber.Handler {
 		}
 
 		if claims, ok := token.Claims.(*models.JWTClaims); ok && token.Valid {
+			// Check if token is blacklisted
+			if isBlacklisted, err := checkTokenBlacklist(claims.ID); err != nil {
+				return c.Status(500).JSON(fiber.Map{"error": "Authentication error"})
+			} else if isBlacklisted {
+				return c.Status(401).JSON(fiber.Map{"error": "Token has been revoked"})
+			}
+
+			// Create user object for context
+			user := &models.User{
+				ID:       claims.UserID,
+				Username: claims.Username,
+				Role:     claims.Role,
+			}
+
 			// Store user info in context
+			c.Locals("user", user)
 			c.Locals("userID", claims.UserID)
 			c.Locals("username", claims.Username)
 			c.Locals("role", claims.Role)
@@ -47,6 +62,26 @@ func JWTMiddleware() fiber.Handler {
 
 		return c.Status(401).JSON(fiber.Map{"error": "Invalid token claims"})
 	}
+}
+
+// Check if token is blacklisted
+func checkTokenBlacklist(jti string) (bool, error) {
+	db, err := config.ConnectDBWithoutMigration()
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+
+	var count int
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM blacklisted_tokens 
+		WHERE token_jti = $1 AND expires_at > NOW()`, jti).Scan(&count)
+
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
 }
 
 // Admin Middleware

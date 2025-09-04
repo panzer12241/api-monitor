@@ -8,9 +8,15 @@ import (
 	"api-monitor/routes"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		log.Println("Warning: .env file not found, using default values")
+	}
+
 	// Connect to database
 	db, err := config.ConnectDB()
 	if err != nil {
