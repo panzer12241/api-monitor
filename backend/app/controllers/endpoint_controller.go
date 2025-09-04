@@ -147,6 +147,11 @@ func (ec *EndpointController) CreateEndpoint(c *fiber.Ctx) error {
 		})
 	}
 
+	// Schedule the endpoint for monitoring if it's active
+	if endpoint.IsActive {
+		ec.Monitor.ScheduleEndpoint(endpoint)
+	}
+
 	return c.Status(201).JSON(fiber.Map{
 		"message": "Endpoint created successfully",
 		"data":    endpoint,
@@ -225,6 +230,13 @@ func (ec *EndpointController) UpdateEndpoint(c *fiber.Ctx) error {
 		})
 	}
 
+	// Update monitoring schedule
+	if endpoint.IsActive {
+		ec.Monitor.ScheduleEndpoint(endpoint)
+	} else {
+		ec.Monitor.UnscheduleEndpoint(endpoint.ID)
+	}
+
 	return c.JSON(fiber.Map{
 		"message": "Endpoint updated successfully",
 		"data":    endpoint,
@@ -259,6 +271,9 @@ func (ec *EndpointController) DeleteEndpoint(c *fiber.Ctx) error {
 		})
 	}
 
+	// Unschedule the endpoint from monitoring
+	ec.Monitor.UnscheduleEndpoint(endpointID)
+
 	return c.Status(200).JSON(fiber.Map{
 		"message": "Endpoint deleted successfully",
 	})
@@ -289,6 +304,37 @@ func (ec *EndpointController) ToggleEndpoint(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{
 			"error": "Failed to toggle endpoint status",
 		})
+	}
+
+	// Update monitoring schedule based on new status
+	if isActive {
+		// Get the full endpoint data to schedule it
+		var endpoint models.APIEndpoint
+		endpointQuery := `
+			SELECT id, name, url, method, COALESCE(headers, '{}'), COALESCE(body, ''), 
+			       timeout_seconds, check_interval_seconds, is_active, proxy_id
+			FROM api_endpoints WHERE id = $1`
+
+		var headersJSON string
+		var proxyID sql.NullInt64
+
+		err = ec.DB.QueryRow(endpointQuery, endpointID).Scan(
+			&endpoint.ID, &endpoint.Name, &endpoint.URL, &endpoint.Method,
+			&headersJSON, &endpoint.Body, &endpoint.TimeoutSeconds,
+			&endpoint.CheckIntervalSeconds, &endpoint.IsActive, &proxyID)
+
+		if err == nil {
+			// Parse headers
+			json.Unmarshal([]byte(headersJSON), &endpoint.Headers)
+			if proxyID.Valid {
+				proxyIDInt := int(proxyID.Int64)
+				endpoint.ProxyID = &proxyIDInt
+			}
+
+			ec.Monitor.ScheduleEndpoint(endpoint)
+		}
+	} else {
+		ec.Monitor.UnscheduleEndpoint(endpointID)
 	}
 
 	return c.Status(200).JSON(fiber.Map{
