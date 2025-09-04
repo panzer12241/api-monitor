@@ -14,9 +14,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/golang-jwt/jwt/v5"
 	_ "github.com/lib/pq"
 	"github.com/robfig/cron/v3"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type APIEndpoint struct {
@@ -58,6 +61,36 @@ type Proxy struct {
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }
 
+type User struct {
+	ID        int       `json:"id" db:"id"`
+	Username  string    `json:"username" db:"username"`
+	Email     string    `json:"email" db:"email"`
+	Password  string    `json:"-" db:"password"` // Hide password in JSON
+	Role      string    `json:"role" db:"role"`
+	IsActive  bool      `json:"is_active" db:"is_active"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+}
+
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type LoginResponse struct {
+	Token string `json:"token"`
+	User  User   `json:"user"`
+}
+
+type JWTClaims struct {
+	UserID   int    `json:"user_id"`
+	Username string `json:"username"`
+	Role     string `json:"role"`
+	jwt.RegisteredClaims
+}
+
+var jwtSecret = []byte(getEnv("JWT_SECRET", "your-secret-key-change-this-in-production"))
+
 type Monitor struct {
 	db         *sql.DB
 	cron       *cron.Cron
@@ -94,38 +127,51 @@ func main() {
 	// Run initial cleanup
 	go monitor.cleanupOldLogs()
 
-	// Setup Gin router
-	r := gin.Default()
+	// Setup Fiber app
+	app := fiber.New()
 
-	// No CORS middleware - let nginx handle CORS
-	// r.Use(func(c *gin.Context) { ... })
+	// Enable CORS
+	app.Use(cors.New(cors.Config{
+		AllowOrigins: "*",
+		AllowMethods: "GET,POST,HEAD,PUT,DELETE,PATCH",
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
+	}))
 
-	// Authentication endpoint (no auth required)
-	r.POST("/api/v1/auth/login", monitor.login)
+	// Public routes (no auth required)
+	auth := app.Group("/api/v1/auth")
+	auth.Post("/login", monitor.login)
+	auth.Post("/register", monitor.register)
 
-	// API endpoints
-	api := r.Group("/api/v1")
+	// Protected API endpoints (require JWT)
+	api := app.Group("/api/v1", monitor.jwtMiddleware)
 	{
 		// Endpoint management
-		api.GET("/endpoints", monitor.getEndpoints)
-		api.POST("/endpoints", monitor.createEndpoint)
-		api.PUT("/endpoints/:id", monitor.updateEndpoint)
-		api.DELETE("/endpoints/:id", monitor.deleteEndpoint)
-		api.POST("/endpoints/:id/toggle", monitor.toggleEndpoint)
-		api.GET("/endpoints/:id/logs", monitor.getEndpointLogs)
-		api.POST("/endpoints/:id/check", monitor.manualCheck)
-		api.POST("/cleanup-logs", monitor.manualCleanup)
+		api.Get("/endpoints", monitor.getEndpoints)
+		api.Post("/endpoints", monitor.createEndpoint)
+		api.Put("/endpoints/:id", monitor.updateEndpoint)
+		api.Delete("/endpoints/:id", monitor.deleteEndpoint)
+		api.Post("/endpoints/:id/toggle", monitor.toggleEndpoint)
+		api.Get("/endpoints/:id/logs", monitor.getEndpointLogs)
+		api.Post("/endpoints/:id/check", monitor.manualCheck)
+		api.Post("/cleanup-logs", monitor.manualCleanup)
 
 		// Proxy management
-		api.GET("/proxies", monitor.getProxies)
-		api.POST("/proxies", monitor.createProxy)
-		api.PUT("/proxies/:id", monitor.updateProxy)
-		api.DELETE("/proxies/:id", monitor.deleteProxy)
-		api.POST("/proxies/:id/toggle", monitor.toggleProxy)
+		api.Get("/proxies", monitor.getProxies)
+		api.Post("/proxies", monitor.createProxy)
+		api.Put("/proxies/:id", monitor.updateProxy)
+		api.Delete("/proxies/:id", monitor.deleteProxy)
+		api.Post("/proxies/:id/toggle", monitor.toggleProxy)
+
+		// User management (admin only)
+		users := api.Group("/users", monitor.adminMiddleware)
+		users.Get("/", monitor.getUsers)
+		users.Post("/", monitor.createUser)
+		users.Put("/:id", monitor.updateUser)
+		users.Delete("/:id", monitor.deleteUser)
 	}
 
 	log.Println("API Monitor started on :8080")
-	log.Fatal(http.ListenAndServe(":8080", r))
+	log.Fatal(app.Listen(":8080"))
 }
 
 func connectDB() (*sql.DB, error) {
@@ -167,7 +213,6 @@ func (m *Monitor) loadActiveEndpoints() {
 		WHERE e.is_active = true`)
 	if err != nil {
 		log.Printf("Error loading active endpoints: %v", err)
-		return
 	}
 	defer rows.Close()
 
@@ -222,7 +267,6 @@ func (m *Monitor) scheduleEndpoint(endpoint APIEndpoint) {
 
 	if err != nil {
 		log.Printf("Error scheduling endpoint %s: %v", endpoint.Name, err)
-		return
 	}
 
 	m.activeJobs[endpoint.ID] = entryID
@@ -279,7 +323,6 @@ func (m *Monitor) checkEndpoint(endpoint APIEndpoint) {
 
 	if err != nil {
 		m.logCheck(endpoint.ID, 0, 0, "", "", fmt.Sprintf("Error creating request: %v", err))
-		return
 	}
 
 	// Add headers
@@ -293,7 +336,6 @@ func (m *Monitor) checkEndpoint(endpoint APIEndpoint) {
 
 	if err != nil {
 		m.logCheck(endpoint.ID, 0, durationMs, "", "", fmt.Sprintf("Request failed: %v", err))
-		return
 	}
 	defer resp.Body.Close()
 
@@ -364,12 +406,12 @@ func (m *Monitor) cleanupOldLogs() {
 	}
 }
 
-func (m *Monitor) manualCleanup(c *gin.Context) {
+func (m *Monitor) manualCleanup(c *fiber.Ctx) error {
 	m.cleanupOldLogs()
-	c.JSON(200, gin.H{"message": "Log cleanup completed"})
+	return c.JSON(fiber.Map{"message": "Log cleanup completed"})
 } // REST API Handlers
 
-func (m *Monitor) getEndpoints(c *gin.Context) {
+func (m *Monitor) getEndpoints(c *fiber.Ctx) error {
 	rows, err := m.db.Query(`
 		SELECT 
 			e.id, e.name, e.url, e.method, 
@@ -382,8 +424,7 @@ func (m *Monitor) getEndpoints(c *gin.Context) {
 		ORDER BY e.created_at DESC`)
 
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 	defer rows.Close()
 
@@ -405,8 +446,7 @@ func (m *Monitor) getEndpoints(c *gin.Context) {
 			&proxyIsActive, &proxyCreatedAt, &proxyUpdatedAt)
 
 		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		json.Unmarshal([]byte(headersJSON), &endpoint.Headers)
@@ -433,14 +473,13 @@ func (m *Monitor) getEndpoints(c *gin.Context) {
 		endpoints = append(endpoints, endpoint)
 	}
 
-	c.JSON(200, endpoints)
+	return c.JSON(endpoints)
 }
 
-func (m *Monitor) createEndpoint(c *gin.Context) {
+func (m *Monitor) createEndpoint(c *fiber.Ctx) error {
 	var endpoint APIEndpoint
-	if err := c.ShouldBindJSON(&endpoint); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
-		return
+	if err := c.BodyParser(&endpoint); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	// Set defaults
@@ -465,29 +504,26 @@ func (m *Monitor) createEndpoint(c *gin.Context) {
 		Scan(&endpoint.ID, &endpoint.CreatedAt, &endpoint.UpdatedAt)
 
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	if endpoint.IsActive {
 		m.scheduleEndpoint(endpoint)
 	}
 
-	c.JSON(201, endpoint)
+	return c.Status(201).JSON(endpoint)
 }
 
-func (m *Monitor) updateEndpoint(c *gin.Context) {
-	id := c.Param("id")
+func (m *Monitor) updateEndpoint(c *fiber.Ctx) error {
+	id := c.Params("id")
 	endpointID, err := strconv.Atoi(id)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "Invalid endpoint ID"})
-		return
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid endpoint ID"})
 	}
 
 	var endpoint APIEndpoint
-	if err := c.ShouldBindJSON(&endpoint); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
-		return
+	if err := c.BodyParser(&endpoint); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	headersJSON, _ := json.Marshal(endpoint.Headers)
@@ -501,8 +537,7 @@ func (m *Monitor) updateEndpoint(c *gin.Context) {
 		endpoint.TimeoutSeconds, endpoint.CheckIntervalSeconds, endpoint.IsActive, endpoint.ProxyID, endpointID)
 
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	// Update scheduling
@@ -549,15 +584,14 @@ func (m *Monitor) updateEndpoint(c *gin.Context) {
 		}
 	}
 
-	c.JSON(200, gin.H{"message": "Endpoint updated successfully"})
+	return c.JSON(fiber.Map{"message": "Endpoint updated successfully"})
 }
 
-func (m *Monitor) deleteEndpoint(c *gin.Context) {
-	id := c.Param("id")
+func (m *Monitor) deleteEndpoint(c *fiber.Ctx) error {
+	id := c.Params("id")
 	endpointID, err := strconv.Atoi(id)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "Invalid endpoint ID"})
-		return
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid endpoint ID"})
 	}
 
 	// Get endpoint info before deleting
@@ -567,8 +601,7 @@ func (m *Monitor) deleteEndpoint(c *gin.Context) {
 		&endpoint.TimeoutSeconds, &endpoint.CheckIntervalSeconds, &endpoint.IsActive,
 		&endpoint.CreatedAt, &endpoint.UpdatedAt)
 	if err != nil {
-		c.JSON(404, gin.H{"error": "Endpoint not found"})
-		return
+		return c.Status(404).JSON(fiber.Map{"error": "Endpoint not found"})
 	}
 
 	m.unscheduleEndpoint(endpointID)
@@ -576,33 +609,29 @@ func (m *Monitor) deleteEndpoint(c *gin.Context) {
 	// Delete endpoint logs first (foreign key constraint)
 	_, err = m.db.Exec("DELETE FROM api_check_logs WHERE endpoint_id = $1", endpointID)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to delete endpoint logs: " + err.Error()})
-		return
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to delete endpoint logs: " + err.Error()})
 	}
 
 	// Delete endpoint
 	_, err = m.db.Exec("DELETE FROM api_endpoints WHERE id = $1", endpointID)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to delete endpoint: " + err.Error()})
-		return
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to delete endpoint: " + err.Error()})
 	}
 
-	c.JSON(200, gin.H{"message": "Endpoint and all related logs deleted successfully"})
+	return c.Status(200).JSON(fiber.Map{"message": "Endpoint and all related logs deleted successfully"})
 }
 
-func (m *Monitor) toggleEndpoint(c *gin.Context) {
-	id := c.Param("id")
+func (m *Monitor) toggleEndpoint(c *fiber.Ctx) error {
+	id := c.Params("id")
 	endpointID, err := strconv.Atoi(id)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "Invalid endpoint ID"})
-		return
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid endpoint ID"})
 	}
 
 	var isActive bool
 	err = m.db.QueryRow("UPDATE api_endpoints SET is_active = NOT is_active, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING is_active", endpointID).Scan(&isActive)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	if isActive {
@@ -619,19 +648,24 @@ func (m *Monitor) toggleEndpoint(c *gin.Context) {
 		m.unscheduleEndpoint(endpointID)
 	}
 
-	c.JSON(200, gin.H{"is_active": isActive})
+	return c.Status(200).JSON(fiber.Map{"is_active": isActive})
 }
 
-func (m *Monitor) getEndpointLogs(c *gin.Context) {
-	id := c.Param("id")
+func (m *Monitor) getEndpointLogs(c *fiber.Ctx) error {
+	id := c.Params("id")
 	endpointID, err := strconv.Atoi(id)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "Invalid endpoint ID"})
-		return
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid endpoint ID"})
 	}
 
-	limit := c.DefaultQuery("limit", "25")
-	offset := c.DefaultQuery("offset", "0")
+	limit := c.Query("limit")
+	if limit == "" {
+		limit = "25"
+	}
+	offset := c.Query("offset")
+	if offset == "" {
+		offset = "0"
+	}
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
 	minResponseTime := c.Query("min_response_time")
@@ -650,8 +684,7 @@ func (m *Monitor) getEndpointLogs(c *gin.Context) {
 	if startDate != "" {
 		// Try to parse the date to validate format
 		if _, err := time.Parse(time.RFC3339, startDate); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid start_date format. Use ISO 8601 format (e.g., 2023-01-01T00:00:00Z)"})
-			return
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid start_date format. Use ISO 8601 format (e.g., 2023-01-01T00:00:00Z)"})
 		}
 		whereClause += fmt.Sprintf(" AND checked_at >= $%d", argIndex)
 		args = append(args, startDate)
@@ -660,8 +693,7 @@ func (m *Monitor) getEndpointLogs(c *gin.Context) {
 	if endDate != "" {
 		// Try to parse the date to validate format
 		if _, err := time.Parse(time.RFC3339, endDate); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid end_date format. Use ISO 8601 format (e.g., 2023-01-01T23:59:59Z)"})
-			return
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid end_date format. Use ISO 8601 format (e.g., 2023-01-01T23:59:59Z)"})
 		}
 		whereClause += fmt.Sprintf(" AND checked_at <= $%d", argIndex)
 		args = append(args, endDate)
@@ -697,8 +729,7 @@ func (m *Monitor) getEndpointLogs(c *gin.Context) {
 	var totalCount int
 	err = m.db.QueryRow(countQuery, args...).Scan(&totalCount)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to get total count: " + err.Error()})
-		return
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to get total count: " + err.Error()})
 	}
 
 	// Get paginated logs with filters - use optimized query
@@ -717,8 +748,7 @@ func (m *Monitor) getEndpointLogs(c *gin.Context) {
 	rows, err := m.db.Query(query, args...)
 
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 	defer rows.Close()
 
@@ -728,14 +758,13 @@ func (m *Monitor) getEndpointLogs(c *gin.Context) {
 		err := rows.Scan(&log.ID, &log.EndpointID, &log.StatusCode, &log.ResponseTimeMs,
 			&log.ResponseBody, &log.ResponseHeaders, &log.ErrorMessage, &log.CheckedAt)
 		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 		logs = append(logs, log)
 	}
 
 	// Return paginated response
-	c.JSON(200, gin.H{
+	return c.JSON(fiber.Map{
 		"logs":       logs,
 		"total":      totalCount,
 		"limit":      limit,
@@ -746,12 +775,11 @@ func (m *Monitor) getEndpointLogs(c *gin.Context) {
 	})
 }
 
-func (m *Monitor) manualCheck(c *gin.Context) {
-	id := c.Param("id")
+func (m *Monitor) manualCheck(c *fiber.Ctx) error {
+	id := c.Params("id")
 	endpointID, err := strconv.Atoi(id)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "Invalid endpoint ID"})
-		return
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid endpoint ID"})
 	}
 
 	// Get endpoint details
@@ -764,8 +792,7 @@ func (m *Monitor) manualCheck(c *gin.Context) {
 			&headersJSON, &endpoint.Body, &endpoint.TimeoutSeconds, &endpoint.CheckIntervalSeconds)
 
 	if err != nil {
-		c.JSON(404, gin.H{"error": "Endpoint not found"})
-		return
+		return c.Status(404).JSON(fiber.Map{"error": "Endpoint not found"})
 	}
 
 	json.Unmarshal([]byte(headersJSON), &endpoint.Headers)
@@ -773,52 +800,188 @@ func (m *Monitor) manualCheck(c *gin.Context) {
 	// Perform check
 	go m.checkEndpoint(endpoint)
 
-	c.JSON(200, gin.H{"message": "Manual check initiated"})
+	return c.Status(200).JSON(fiber.Map{"message": "Manual check initiated"})
 }
 
-// Login endpoint for authentication
-func (m *Monitor) login(c *gin.Context) {
-	var credentials struct {
+// JWT Middleware
+func (m *Monitor) jwtMiddleware(c *fiber.Ctx) error {
+	authHeader := c.Get("Authorization")
+	if authHeader == "" {
+		return c.Status(401).JSON(fiber.Map{"error": "Authorization header required"})
+	}
+
+	// Extract token from Bearer scheme
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+	if tokenString == authHeader {
+		return c.Status(401).JSON(fiber.Map{"error": "Bearer token required"})
+	}
+
+	// Parse and validate token
+	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return jwtSecret, nil
+	})
+
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"error": "Invalid token"})
+	}
+
+	if claims, ok := token.Claims.(*JWTClaims); ok && token.Valid {
+		// Store user info in context
+		c.Locals("userID", claims.UserID)
+		c.Locals("username", claims.Username)
+		c.Locals("role", claims.Role)
+		return c.Next()
+	}
+
+	return c.Status(401).JSON(fiber.Map{"error": "Invalid token claims"})
+}
+
+// Admin Middleware
+func (m *Monitor) adminMiddleware(c *fiber.Ctx) error {
+	role := c.Locals("role")
+	if role != "admin" {
+		return c.Status(403).JSON(fiber.Map{"error": "Admin access required"})
+	}
+	return c.Next()
+}
+
+// Generate JWT token
+func (m *Monitor) generateJWT(user User) (string, error) {
+	claims := JWTClaims{
+		UserID:   user.ID,
+		Username: user.Username,
+		Role:     user.Role,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			NotBefore: jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(jwtSecret)
+}
+
+// Hash password
+func (m *Monitor) hashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(bytes), err
+}
+
+// Check password
+func (m *Monitor) checkPassword(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
+}
+
+// Login endpoint
+func (m *Monitor) login(c *fiber.Ctx) error {
+	var req LoginRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+	}
+
+	// Get user from database
+	var user User
+	err := m.db.QueryRow(`
+		SELECT id, username, email, password, role, is_active, created_at, updated_at
+		FROM users WHERE username = $1 AND is_active = true`, req.Username).
+		Scan(&user.ID, &user.Username, &user.Email, &user.Password, &user.Role, &user.IsActive, &user.CreatedAt, &user.UpdatedAt)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return c.Status(401).JSON(fiber.Map{"error": "Invalid credentials"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "Database error"})
+	}
+
+	// Check password
+	if !m.checkPassword(req.Password, user.Password) {
+		return c.Status(401).JSON(fiber.Map{"error": "Invalid credentials"})
+	}
+
+	// Generate JWT token
+	token, err := m.generateJWT(user)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Could not generate token"})
+	}
+
+	// Return response without password
+	user.Password = ""
+	return c.JSON(LoginResponse{
+		Token: token,
+		User:  user,
+	})
+}
+
+// Register endpoint
+func (m *Monitor) register(c *fiber.Ctx) error {
+	var req struct {
 		Username string `json:"username"`
+		Email    string `json:"email"`
 		Password string `json:"password"`
+		Role     string `json:"role"`
 	}
 
-	if err := c.ShouldBindJSON(&credentials); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid request body"})
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
 	}
 
-	// Simple authentication (in production, use proper password hashing)
-	if credentials.Username == "admin" && credentials.Password == "admin123" {
-		token := fmt.Sprintf("demo-token-%d", time.Now().Unix())
-
-		c.JSON(200, gin.H{
-			"success": true,
-			"token":   token,
-			"user": gin.H{
-				"id":       1,
-				"username": credentials.Username,
-				"name":     "Administrator",
-			},
-		})
-	} else {
-		c.JSON(401, gin.H{
-			"success": false,
-			"error":   "Invalid credentials",
-		})
+	// Validate input
+	if req.Username == "" || req.Email == "" || req.Password == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Username, email, and password are required"})
 	}
+
+	if req.Role == "" {
+		req.Role = "user" // Default role
+	}
+
+	// Hash password
+	hashedPassword, err := m.hashPassword(req.Password)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Could not hash password"})
+	}
+
+	// Insert user into database
+	var user User
+	err = m.db.QueryRow(`
+		INSERT INTO users (username, email, password, role, is_active, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, true, NOW(), NOW())
+		RETURNING id, username, email, role, is_active, created_at, updated_at`,
+		req.Username, req.Email, hashedPassword, req.Role).
+		Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.IsActive, &user.CreatedAt, &user.UpdatedAt)
+
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key") {
+			return c.Status(409).JSON(fiber.Map{"error": "Username or email already exists"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "Could not create user"})
+	}
+
+	// Generate JWT token
+	token, err := m.generateJWT(user)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Could not generate token"})
+	}
+
+	return c.Status(201).JSON(LoginResponse{
+		Token: token,
+		User:  user,
+	})
 }
 
 // Proxy management methods
-func (m *Monitor) getProxies(c *gin.Context) {
+func (m *Monitor) getProxies(c *fiber.Ctx) error {
 	rows, err := m.db.Query(`
 		SELECT id, name, host, port, username, password, is_active, created_at, updated_at
 		FROM proxies 
 		ORDER BY created_at DESC`)
 
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 	defer rows.Close()
 
@@ -829,26 +992,23 @@ func (m *Monitor) getProxies(c *gin.Context) {
 			&proxy.Username, &proxy.Password, &proxy.IsActive,
 			&proxy.CreatedAt, &proxy.UpdatedAt)
 		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 		proxies = append(proxies, proxy)
 	}
 
-	c.JSON(200, proxies)
+	return c.JSON(proxies)
 }
 
-func (m *Monitor) createProxy(c *gin.Context) {
+func (m *Monitor) createProxy(c *fiber.Ctx) error {
 	var proxy Proxy
-	if err := c.ShouldBindJSON(&proxy); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
-		return
+	if err := c.BodyParser(&proxy); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	// Validate required fields
 	if proxy.Name == "" || proxy.Host == "" || proxy.Port <= 0 {
-		c.JSON(400, gin.H{"error": "Name, host, and port are required"})
-		return
+		return c.Status(400).JSON(fiber.Map{"error": "Name, host, and port are required"})
 	}
 
 	err := m.db.QueryRow(`
@@ -859,25 +1019,22 @@ func (m *Monitor) createProxy(c *gin.Context) {
 		Scan(&proxy.ID, &proxy.CreatedAt, &proxy.UpdatedAt)
 
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to create proxy: " + err.Error()})
-		return
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to create proxy: " + err.Error()})
 	}
 
-	c.JSON(201, proxy)
+	return c.JSON(proxy)
 }
 
-func (m *Monitor) updateProxy(c *gin.Context) {
-	id := c.Param("id")
+func (m *Monitor) updateProxy(c *fiber.Ctx) error {
+	id := c.Params("id")
 	proxyID, err := strconv.Atoi(id)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "Invalid proxy ID"})
-		return
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid proxy ID"})
 	}
 
 	var proxy Proxy
-	if err := c.ShouldBindJSON(&proxy); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
-		return
+	if err := c.BodyParser(&proxy); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	proxy.ID = proxyID
@@ -891,68 +1048,239 @@ func (m *Monitor) updateProxy(c *gin.Context) {
 		Scan(&proxy.CreatedAt, &proxy.UpdatedAt)
 
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to update proxy: " + err.Error()})
-		return
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to update proxy: " + err.Error()})
 	}
 
-	c.JSON(200, proxy)
+	return c.JSON(proxy)
 }
 
-func (m *Monitor) deleteProxy(c *gin.Context) {
-	id := c.Param("id")
+func (m *Monitor) deleteProxy(c *fiber.Ctx) error {
+	id := c.Params("id")
 	proxyID, err := strconv.Atoi(id)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "Invalid proxy ID"})
-		return
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid proxy ID"})
 	}
 
 	// Check if any endpoints are using this proxy
 	var count int
 	err = m.db.QueryRow("SELECT COUNT(*) FROM api_endpoints WHERE proxy_id = $1", proxyID).Scan(&count)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to check proxy usage: " + err.Error()})
-		return
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to check proxy usage: " + err.Error()})
 	}
 
 	if count > 0 {
-		c.JSON(400, gin.H{"error": fmt.Sprintf("Cannot delete proxy: %d endpoints are using this proxy", count)})
-		return
+		return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("Cannot delete proxy: %d endpoints are using this proxy", count)})
 	}
 
 	_, err = m.db.Exec("DELETE FROM proxies WHERE id = $1", proxyID)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to delete proxy: " + err.Error()})
-		return
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to delete proxy: " + err.Error()})
 	}
 
-	c.JSON(200, gin.H{"message": "Proxy deleted successfully"})
+	return c.Status(200).JSON(fiber.Map{"message": "Proxy deleted successfully"})
 }
 
-func (m *Monitor) toggleProxy(c *gin.Context) {
-	id := c.Param("id")
+func (m *Monitor) toggleProxy(c *fiber.Ctx) error {
+	id := c.Params("id")
 	proxyID, err := strconv.Atoi(id)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "Invalid proxy ID"})
-		return
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid proxy ID"})
 	}
 
 	var isActive bool
 	err = m.db.QueryRow("SELECT is_active FROM proxies WHERE id = $1", proxyID).Scan(&isActive)
 	if err != nil {
-		c.JSON(404, gin.H{"error": "Proxy not found"})
-		return
+		return c.Status(404).JSON(fiber.Map{"error": "Proxy not found"})
 	}
 
 	newStatus := !isActive
 	_, err = m.db.Exec("UPDATE proxies SET is_active = $1, updated_at = NOW() WHERE id = $2", newStatus, proxyID)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to toggle proxy status: " + err.Error()})
-		return
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to toggle proxy status: " + err.Error()})
 	}
 
-	c.JSON(200, gin.H{
+	return c.JSON(fiber.Map{
 		"id":        proxyID,
 		"is_active": newStatus,
 		"message":   fmt.Sprintf("Proxy %s", map[bool]string{true: "activated", false: "deactivated"}[newStatus]),
 	})
+}
+
+// User management functions (Admin only)
+func (m *Monitor) getUsers(c *fiber.Ctx) error {
+	rows, err := m.db.Query(`
+		SELECT id, username, email, role, is_active, created_at, updated_at
+		FROM users 
+		ORDER BY created_at DESC`)
+
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var user User
+		err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.IsActive, &user.CreatedAt, &user.UpdatedAt)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+		users = append(users, user)
+	}
+
+	return c.JSON(users)
+}
+
+func (m *Monitor) createUser(c *fiber.Ctx) error {
+	var req struct {
+		Username string `json:"username"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+	}
+
+	// Validate input
+	if req.Username == "" || req.Email == "" || req.Password == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "Username, email, and password are required"})
+	}
+
+	if req.Role == "" {
+		req.Role = "user"
+	}
+
+	// Hash password
+	hashedPassword, err := m.hashPassword(req.Password)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Could not hash password"})
+	}
+
+	// Insert user
+	var user User
+	err = m.db.QueryRow(`
+		INSERT INTO users (username, email, password, role, is_active, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, true, NOW(), NOW())
+		RETURNING id, username, email, role, is_active, created_at, updated_at`,
+		req.Username, req.Email, hashedPassword, req.Role).
+		Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.IsActive, &user.CreatedAt, &user.UpdatedAt)
+
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key") {
+			return c.Status(409).JSON(fiber.Map{"error": "Username or email already exists"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "Could not create user"})
+	}
+
+	return c.Status(201).JSON(user)
+}
+
+func (m *Monitor) updateUser(c *fiber.Ctx) error {
+	id := c.Params("id")
+	userID, err := strconv.Atoi(id)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+		IsActive *bool  `json:"is_active"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+	}
+
+	// Build update query dynamically
+	updates := []string{}
+	args := []interface{}{}
+	argIndex := 1
+
+	if req.Username != "" {
+		updates = append(updates, fmt.Sprintf("username = $%d", argIndex))
+		args = append(args, req.Username)
+		argIndex++
+	}
+
+	if req.Email != "" {
+		updates = append(updates, fmt.Sprintf("email = $%d", argIndex))
+		args = append(args, req.Email)
+		argIndex++
+	}
+
+	if req.Password != "" {
+		hashedPassword, err := m.hashPassword(req.Password)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Could not hash password"})
+		}
+		updates = append(updates, fmt.Sprintf("password = $%d", argIndex))
+		args = append(args, hashedPassword)
+		argIndex++
+	}
+
+	if req.Role != "" {
+		updates = append(updates, fmt.Sprintf("role = $%d", argIndex))
+		args = append(args, req.Role)
+		argIndex++
+	}
+
+	if req.IsActive != nil {
+		updates = append(updates, fmt.Sprintf("is_active = $%d", argIndex))
+		args = append(args, *req.IsActive)
+		argIndex++
+	}
+
+	if len(updates) == 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "No fields to update"})
+	}
+
+	updates = append(updates, "updated_at = NOW()")
+	args = append(args, userID)
+
+	query := fmt.Sprintf("UPDATE users SET %s WHERE id = $%d", strings.Join(updates, ", "), argIndex)
+	_, err = m.db.Exec(query, args...)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Could not update user"})
+	}
+
+	return c.JSON(fiber.Map{"message": "User updated successfully"})
+}
+
+func (m *Monitor) deleteUser(c *fiber.Ctx) error {
+	id := c.Params("id")
+	userID, err := strconv.Atoi(id)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+
+	// Check if user exists
+	var count int
+	err = m.db.QueryRow("SELECT COUNT(*) FROM users WHERE id = $1", userID).Scan(&count)
+	if err != nil || count == 0 {
+		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
+	}
+
+	// Prevent deleting the last admin
+	var adminCount int
+	err = m.db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = true").Scan(&adminCount)
+	if err == nil {
+		var userRole string
+		m.db.QueryRow("SELECT role FROM users WHERE id = $1", userID).Scan(&userRole)
+		if userRole == "admin" && adminCount <= 1 {
+			return c.Status(400).JSON(fiber.Map{"error": "Cannot delete the last admin user"})
+		}
+	}
+
+	// Delete user
+	_, err = m.db.Exec("DELETE FROM users WHERE id = $1", userID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Could not delete user"})
+	}
+
+	return c.JSON(fiber.Map{"message": "User deleted successfully"})
 }
