@@ -371,11 +371,18 @@ export default {
     
     async toggleProxy(proxy) {
       try {
-        await proxiesAPI.toggle(proxy.id)
-        this.showSnackbar(`Proxy ${proxy.is_active ? 'deactivated' : 'activated'}`)
-        // Update local state
-        proxy.is_active = !proxy.is_active
-        this.fetchProxies()
+        const response = await proxiesAPI.toggle(proxy.id)
+        
+        // Use response data to update state
+        if (response && response.data && response.data.data) {
+          const newState = response.data.data.is_active
+          proxy.is_active = newState
+          this.showSnackbar(`Proxy ${newState ? 'activated' : 'deactivated'}`, 'success')
+        } else {
+          // Fallback: refresh data to get current state
+          this.fetchProxies()
+          this.showSnackbar('Proxy status updated', 'success')
+        }
       } catch (error) {
         this.showSnackbar('Failed to toggle proxy status', 'error')
       }

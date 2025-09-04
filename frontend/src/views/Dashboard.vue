@@ -124,7 +124,7 @@
           
           <v-data-table
             :headers="endpointHeaders"
-            :items="endpoints"
+            :items="endpointsData"
             :loading="loading"
             class="elevation-1"
           >
@@ -662,12 +662,20 @@ export default {
   },
   
   computed: {
+    endpointsData() {
+      return Array.isArray(this.endpoints) ? this.endpoints : []
+    },
+    
+    proxiesData() {
+      return Array.isArray(this.proxies) ? this.proxies : []
+    },
+    
     totalEndpoints() {
-      return this.endpoints.length
+      return this.endpointsData.length
     },
     
     activeEndpoints() {
-      return this.endpoints.filter(endpoint => endpoint.is_active).length
+      return this.endpointsData.filter(endpoint => endpoint.is_active).length
     },
     
     healthyEndpoints() {
@@ -681,14 +689,14 @@ export default {
     },
     
     endpointOptions() {
-      return this.endpoints.map(endpoint => ({
+      return this.endpointsData.map(endpoint => ({
         id: endpoint.id,
         name: endpoint.name || endpoint.url
       }))
     },
     
     proxyOptions() {
-      return this.proxies.filter(proxy => proxy.is_active)
+      return this.proxiesData.filter(proxy => proxy.is_active)
     },
     
     totalPages() {
@@ -740,10 +748,22 @@ export default {
       this.loading = true
       try {
         const response = await endpointsAPI.getAll()
-        this.endpoints = response.data || []
+        
+        // Handle Axios response structure
+        if (response && response.data) {
+          if (response.data.data && Array.isArray(response.data.data)) {
+            this.endpoints = response.data.data
+          } else if (Array.isArray(response.data)) {
+            this.endpoints = response.data
+          } else {
+            this.endpoints = []
+          }
+        } else {
+          this.endpoints = []
+        }
       } catch (error) {
         this.showSnackbar('Failed to fetch endpoints', 'error')
-        console.error(error)
+        this.endpoints = []
       } finally {
         this.loading = false
       }
@@ -752,9 +772,20 @@ export default {
     async fetchProxies() {
       try {
         const response = await proxiesAPI.getAll()
-        this.proxies = response.data || []
+        
+        // Handle Axios response structure
+        if (response && response.data) {
+          if (response.data.data && Array.isArray(response.data.data)) {
+            this.proxies = response.data.data
+          } else if (Array.isArray(response.data)) {
+            this.proxies = response.data
+          } else {
+            this.proxies = []
+          }
+        } else {
+          this.proxies = []
+        }
       } catch (error) {
-        console.error('Failed to fetch proxies:', error)
         this.proxies = []
       }
     },
@@ -797,7 +828,6 @@ export default {
         this.refreshData()
       } catch (error) {
         this.showSnackbar('Failed to save endpoint', 'error')
-        console.error(error)
       } finally {
         this.saving = false
       }
@@ -805,13 +835,22 @@ export default {
     
     async toggleEndpoint(endpoint) {
       try {
-        await endpointsAPI.toggle(endpoint.id)
-        this.showSnackbar(`Endpoint ${endpoint.is_active ? 'deactivated' : 'activated'}`, 'success')
-        // Update local state
-        endpoint.is_active = !endpoint.is_active
+        const response = await endpointsAPI.toggle(endpoint.id)
+        
+        // Use response data to update state
+        if (response && response.data && response.data.data) {
+          const newState = response.data.data.is_active
+          endpoint.is_active = newState
+          this.showSnackbar(`Endpoint ${newState ? 'activated' : 'deactivated'}`, 'success')
+        } else {
+          // Fallback: refresh data to get current state
+          this.refreshData()
+          this.showSnackbar('Endpoint status updated', 'success')
+        }
       } catch (error) {
+        // Revert switch state on error
+        endpoint.is_active = !endpoint.is_active
         this.showSnackbar('Failed to toggle endpoint', 'error')
-        console.error(error)
       }
     },
     
@@ -830,7 +869,6 @@ export default {
         this.refreshData()
       } catch (error) {
         this.showSnackbar('Failed to delete endpoint', 'error')
-        console.error(error)
       } finally {
         this.deleting = false
       }
@@ -896,7 +934,6 @@ export default {
         }
       } catch (error) {
         this.showSnackbar('Failed to fetch logs', 'error')
-        console.error(error)
         this.logs = []
         this.totalLogs = 0
       } finally {
@@ -922,7 +959,6 @@ export default {
         if (!headersStr || headersStr.trim() === '') return {}
         return JSON.parse(headersStr)
       } catch (e) {
-        console.error('Error parsing headers:', e, 'Headers string:', headersStr)
         return {}
       }
     },
