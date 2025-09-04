@@ -42,7 +42,7 @@ func SetupRoutes(app *fiber.App, db *sql.DB, monitor *services.MonitorService) {
 		api.Put("/endpoints/:id", endpointController.UpdateEndpoint)
 		api.Delete("/endpoints/:id", endpointController.DeleteEndpoint)
 		api.Post("/endpoints/:id/toggle", endpointController.ToggleEndpoint)
-		// api.Get("/endpoints/:id/logs", endpointController.GetEndpointLogs)
+		api.Get("/endpoints/:id/logs", endpointController.GetEndpointLogs)
 		// api.Post("/endpoints/:id/check", endpointController.ManualCheck)
 		// api.Post("/cleanup-logs", endpointController.ManualCleanup)
 

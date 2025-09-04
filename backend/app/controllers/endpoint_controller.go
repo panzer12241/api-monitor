@@ -172,6 +172,20 @@ func (ec *EndpointController) UpdateEndpoint(c *fiber.Ctx) error {
 		})
 	}
 
+	// Convert headers map to JSON string
+	var headersJSON string
+	if len(endpoint.Headers) > 0 {
+		headersBytes, err := json.Marshal(endpoint.Headers)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{
+				"error": "Invalid headers format",
+			})
+		}
+		headersJSON = string(headersBytes)
+	} else {
+		headersJSON = "{}"
+	}
+
 	query := `
 		UPDATE api_endpoints 
 		SET name = $1, url = $2, method = $3, headers = $4, body = $5, 
@@ -191,7 +205,7 @@ func (ec *EndpointController) UpdateEndpoint(c *fiber.Ctx) error {
 		endpoint.Name,
 		endpoint.URL,
 		endpoint.Method,
-		endpoint.Headers,
+		headersJSON,
 		endpoint.Body,
 		endpoint.TimeoutSeconds,
 		endpoint.CheckIntervalSeconds,
@@ -283,5 +297,148 @@ func (ec *EndpointController) ToggleEndpoint(c *fiber.Ctx) error {
 			"id":        endpointID,
 			"is_active": isActive,
 		},
+	})
+}
+
+// GetEndpointLogs retrieves logs for a specific endpoint with pagination and filtering
+func (ec *EndpointController) GetEndpointLogs(c *fiber.Ctx) error {
+	id := c.Params("id")
+	endpointID, err := strconv.Atoi(id)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid endpoint ID"})
+	}
+
+	// Parse query parameters
+	limit := c.QueryInt("limit", 25)
+	offset := c.QueryInt("offset", 0)
+	startDate := c.Query("start_date", "")
+	endDate := c.Query("end_date", "")
+	minResponseTime := c.Query("min_response_time", "")
+	statusCode := c.Query("status_code", "")
+
+	// Validate limit
+	if limit > 100 {
+		limit = 100
+	}
+	if limit < 1 {
+		limit = 25
+	}
+
+	// Build WHERE conditions
+	whereConditions := []string{"endpoint_id = $1"}
+	args := []interface{}{endpointID}
+	argIndex := 2
+
+	if startDate != "" {
+		whereConditions = append(whereConditions, "checked_at >= $"+strconv.Itoa(argIndex))
+		args = append(args, startDate)
+		argIndex++
+	}
+
+	if endDate != "" {
+		whereConditions = append(whereConditions, "checked_at <= $"+strconv.Itoa(argIndex))
+		args = append(args, endDate)
+		argIndex++
+	}
+
+	if minResponseTime != "" {
+		if minRt, err := strconv.Atoi(minResponseTime); err == nil {
+			whereConditions = append(whereConditions, "response_time_ms >= $"+strconv.Itoa(argIndex))
+			args = append(args, minRt)
+			argIndex++
+		}
+	}
+
+	if statusCode != "" {
+		if statusCode == "2xx" {
+			whereConditions = append(whereConditions, "status_code >= 200 AND status_code < 300")
+		} else if statusCode == "3xx" {
+			whereConditions = append(whereConditions, "status_code >= 300 AND status_code < 400")
+		} else if statusCode == "4xx" {
+			whereConditions = append(whereConditions, "status_code >= 400 AND status_code < 500")
+		} else if statusCode == "5xx" {
+			whereConditions = append(whereConditions, "status_code >= 500 AND status_code < 600")
+		} else if sc, err := strconv.Atoi(statusCode); err == nil {
+			whereConditions = append(whereConditions, "status_code = $"+strconv.Itoa(argIndex))
+			args = append(args, sc)
+			argIndex++
+		}
+	}
+
+	whereClause := ""
+	if len(whereConditions) > 0 {
+		whereClause = "WHERE "
+		for i, condition := range whereConditions {
+			if i > 0 {
+				whereClause += " AND "
+			}
+			whereClause += condition
+		}
+	}
+
+	// Get total count
+	countQuery := "SELECT COUNT(*) FROM api_check_logs " + whereClause
+	var totalCount int
+	err = ec.DB.QueryRow(countQuery, args...).Scan(&totalCount)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to count logs",
+		})
+	}
+
+	// Get logs with pagination
+	query := `
+		SELECT id, endpoint_id, status_code, response_time_ms, response_body, 
+		       response_headers, error_message, checked_at
+		FROM api_check_logs ` + whereClause + `
+		ORDER BY checked_at DESC
+		LIMIT $` + strconv.Itoa(argIndex) + ` OFFSET $` + strconv.Itoa(argIndex+1)
+
+	args = append(args, limit, offset)
+
+	rows, err := ec.DB.Query(query, args...)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error": "Failed to fetch logs",
+		})
+	}
+	defer rows.Close()
+
+	var logs []models.APICheckLog
+	for rows.Next() {
+		var log models.APICheckLog
+		var statusCode, responseTimeMs sql.NullInt64
+
+		err := rows.Scan(
+			&log.ID,
+			&log.EndpointID,
+			&statusCode,
+			&responseTimeMs,
+			&log.ResponseBody,
+			&log.ResponseHeaders,
+			&log.ErrorMessage,
+			&log.CheckedAt,
+		)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{
+				"error": "Failed to scan log data",
+			})
+		}
+
+		if statusCode.Valid {
+			log.StatusCode = int(statusCode.Int64)
+		}
+		if responseTimeMs.Valid {
+			log.ResponseTimeMs = int(responseTimeMs.Int64)
+		}
+
+		logs = append(logs, log)
+	}
+
+	return c.JSON(fiber.Map{
+		"logs":   logs,
+		"total":  totalCount,
+		"limit":  limit,
+		"offset": offset,
 	})
 }

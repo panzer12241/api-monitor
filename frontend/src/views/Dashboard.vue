@@ -810,9 +810,9 @@ export default {
       
       const payload = {
         ...this.endpointForm,
-        method: 'GET',
-        headers: {},
-        body: ''
+        method: this.endpointForm.method || 'GET',
+        headers: this.endpointForm.headers || {},
+        body: this.endpointForm.body || ''
       }
       
       try {
