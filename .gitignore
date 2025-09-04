@@ -101,11 +101,55 @@ temp/
 # Test binary, built with `go test -c`
 *.test
 
-# Output of the go build command
+# Output of the go build command, go install, and go build cache
 backend/main
+backend/api-monitor
+*.bin
 
 # Go workspace file
 go.work
+go.work.sum
+
+# Go build cache
+.cache/
+
+# Go module proxy cache
+GOPROXY=
+
+# Dependency directories
+vendor/
+
+# Go test coverage
+*.out
+coverage.html
+coverage.xml
+
+# Go build artifacts
+bin/
+build/
+dist/
+
+# Air live reload tool
+tmp/
+.air.toml
+
+# Delve debugger
+debug
+__debug_bin
+
+# GoLand/IntelliJ Go plugin
+.idea/
+
+# VSCode Go extension
+.vscode/launch.json
+.vscode/settings.json
+
+# Go sum backup files
+go.sum.backup
+
+# Local environment files specific to Go
+.env.go
+.env.local.go
 
 # Docker
 .dockerignore
