@@ -334,7 +334,7 @@
           <v-spacer></v-spacer>
           <v-btn 
             color="primary" 
-            @click="fetchLogs" 
+            @click="resetAndFetchLogs" 
             :loading="logsLoading"
             size="small"
             class="mr-2"
@@ -920,6 +920,7 @@ export default {
     },
     
     async fetchLogs(append = false) {
+      console.log('fetchLogs called with append:', append, 'selectedEndpoint:', this.selectedEndpoint?.id)
       if (!this.selectedEndpoint) return
       
       if (!append) {
@@ -968,7 +969,7 @@ export default {
           }
         }
       } catch (error) {
-        this.showSnackbar('Failed to fetch logs', 'error')
+        this.showSnackbar('Failed to fetch logs: ' + (error.response?.data?.message || error.message), 'error')
         if (!append) {
           this.logs = []
           this.totalLogs = 0
