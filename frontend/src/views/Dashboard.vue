@@ -904,26 +904,26 @@ export default {
       this.logsLoading = true
       try {
         const offset = (this.currentPage - 1) * this.logsPerPage
-        const params = new URLSearchParams({
-          limit: this.logsPerPage.toString(),
-          offset: offset.toString()
-        })
+        const params = {
+          limit: this.logsPerPage,
+          offset: offset
+        }
         
         // Add filters if provided
         if (this.filters.startDate) {
-          params.append('start_date', this.filters.startDate)
+          params.start_date = this.filters.startDate
         }
         if (this.filters.endDate) {
-          params.append('end_date', this.filters.endDate)
+          params.end_date = this.filters.endDate
         }
         if (this.filters.minResponseTime) {
-          params.append('min_response_time', this.filters.minResponseTime.toString())
+          params.min_response_time = this.filters.minResponseTime
         }
         if (this.filters.statusCode) {
-          params.append('status_code', this.filters.statusCode)
+          params.status_code = this.filters.statusCode
         }
         
-        const response = await axios.get(`${API_BASE}/endpoints/${this.selectedEndpoint.id}/logs?${params}`)
+        const response = await endpointsAPI.getLogs(this.selectedEndpoint.id, params)
         
         if (response.data) {
           this.logs = response.data.logs || []
