@@ -193,371 +193,41 @@
       </v-col>
     </v-row>
 
-    <!-- Create/Edit Dialog -->
-    <v-dialog v-model="dialog" max-width="800px" persistent>
-      <v-card>
-        <v-card-title>
-          <span class="text-h5">
-            <v-icon left>{{ isEditMode ? 'mdi-pencil' : 'mdi-plus' }}</v-icon>
-            {{ isEditMode ? 'Edit Endpoint' : 'Create Endpoint' }}
-          </span>
-        </v-card-title>
-        
-        <v-card-text>
-          <v-form ref="endpointForm" v-model="valid">
-            <v-text-field
-              v-model="endpointForm.name"
-              label="Name"
-              :rules="nameRules"
-              required
-              outlined
-              placeholder="My API Endpoint"
-            ></v-text-field>
-            
-            <v-text-field
-              v-model="endpointForm.url"
-              label="URL"
-              :rules="urlRules"
-              required
-              outlined
-              placeholder="https://api.example.com/health"
-            ></v-text-field>
-            
-            <v-row>
-              <v-col cols="6">
-                <v-text-field
-                  v-model.number="endpointForm.check_interval_seconds"
-                  label="Check Interval (seconds)"
-                  type="number"
-                  :min="10"
-                  :max="3600"
-                  outlined
-                ></v-text-field>
-              </v-col>
-              
-              <v-col cols="6">
-                <v-text-field
-                  v-model.number="endpointForm.timeout_seconds"
-                  label="Timeout (seconds)"
-                  type="number"
-                  :min="5"
-                  :max="300"
-                  outlined
-                ></v-text-field>
-              </v-col>
-            </v-row>
-            
-            <v-select
-              v-model="endpointForm.proxy_id"
-              :items="proxyOptions"
-              item-title="name"
-              item-value="id"
-              label="Proxy (Optional)"
-              clearable
-              outlined
-              prepend-inner-icon="mdi-server-network"
-            >
-              <template v-slot:item="{ props, item }">
-                <v-list-item v-bind="props" :disabled="!item.raw.is_active">
-                  <v-list-item-title>{{ item.raw.name }}</v-list-item-title>
-                  <v-list-item-subtitle>
-                    {{ item.raw.host }}:{{ item.raw.port }}
-                    <v-chip
-                      v-if="!item.raw.is_active"
-                      size="x-small"
-                      color="error"
-                      class="ml-2"
-                    >
-                      Inactive
-                    </v-chip>
-                  </v-list-item-subtitle>
-                </v-list-item>
-              </template>
-            </v-select>
-            
-            <v-switch
-              v-model="endpointForm.is_active"
-              label="Active"
-              color="success"
-            ></v-switch>
-          </v-form>
-        </v-card-text>
-        
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <v-btn text @click="dialog = false">Cancel</v-btn>
-          <v-btn 
-            color="primary" 
-            @click="saveEndpoint"
-            :disabled="!valid"
-            :loading="saving"
-          >
-            {{ isEditMode ? 'Update' : 'Create' }}
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <!-- Modal Components -->
+    <EndpointFormModal
+      v-model:dialog="dialog"
+      :is-edit-mode="isEditMode"
+      :endpoint-data="endpointForm"
+      :proxy-options="proxyOptions"
+      :saving="saving"
+      @save="handleSaveEndpoint"
+      @close="handleCloseFormModal"
+    />
 
-    <!-- Delete Confirmation Dialog -->
-    <v-dialog v-model="deleteDialog" max-width="400px">
-      <v-card>
-        <v-card-title>
-          <v-icon left color="error">mdi-delete</v-icon>
-          Confirm Delete
-        </v-card-title>
-        
-        <v-card-text>
-          Are you sure you want to delete the endpoint "{{ deletingEndpoint?.name }}"?
-          This action cannot be undone.
-        </v-card-text>
-        
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <v-btn text @click="deleteDialog = false">Cancel</v-btn>
-          <v-btn 
-            color="error" 
-            @click="confirmDelete"
-            :loading="deleting"
-          >
-            Delete
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <DeleteConfirmationModal
+      v-model:dialog="deleteDialog"
+      :endpoint="deletingEndpoint"
+      :deleting="deleting"
+      @confirm="handleConfirmDelete"
+      @close="handleCloseDeleteModal"
+    />
 
-    <!-- Logs Dialog -->
-    <v-dialog v-model="logsDialog" max-width="1400px" fullscreen-mobile>
-      <v-card class="logs-dialog-card">
-        <v-card-title class="pa-6 pb-4 position-relative">
-          <v-icon left>mdi-history</v-icon>
-          Endpoint Logs: {{ selectedEndpoint?.name || selectedEndpoint?.url }}
-          <v-spacer></v-spacer>
-          <v-btn 
-            color="primary" 
-            @click="resetAndFetchLogs" 
-            :loading="logsLoading"
-            size="small"
-            class="mr-2"
-          >
-            <v-icon left>mdi-refresh</v-icon>
-            Refresh
-          </v-btn>
-          
-          <!-- Close button in top right corner -->
-          <v-btn
-            icon
-            @click="logsDialog = false"
-            class="close-btn"
-            size="large"
-            color="amber"
-            variant="elevated"
-          >
-            <v-icon size="24" color="black">mdi-close</v-icon>
-          </v-btn>
-        </v-card-title>
-        
-        <!-- Filters Section -->
-        <v-card-text class="pa-6 pt-0">
-          <v-expansion-panels v-model="filtersExpanded" class="mb-4">
-            <v-expansion-panel>
-              <v-expansion-panel-title class="pa-4">
-                <v-icon left>mdi-filter</v-icon>
-                Advanced Filters
-              </v-expansion-panel-title>
-              <v-expansion-panel-text class="pa-4">
-                <v-row class="mb-4">
-                  <v-col cols="12" md="3">
-                    <v-text-field
-                      v-model="filters.startDate"
-                      label="Start Date"
-                      type="datetime-local"
-                      outlined
-                      dense
-                      @update:model-value="resetAndFetchLogs"
-                    ></v-text-field>
-                  </v-col>
-                  
-                  <v-col cols="12" md="3">
-                    <v-text-field
-                      v-model="filters.endDate"
-                      label="End Date"
-                      type="datetime-local"
-                      outlined
-                      dense
-                      @update:model-value="resetAndFetchLogs"
-                    ></v-text-field>
-                  </v-col>
-                  
-                  <v-col cols="12" md="3">
-                    <v-text-field
-                      v-model.number="filters.minResponseTime"
-                      label="Min Response Time (ms)"
-                      type="number"
-                      outlined
-                      dense
-                      placeholder="e.g. 1000"
-                      @update:model-value="resetAndFetchLogs"
-                    ></v-text-field>
-                  </v-col>
-                  
-                  <v-col cols="12" md="3">
-                    <v-select
-                      v-model="filters.statusCode"
-                      :items="statusCodeOptions"
-                      label="Status Code"
-                      outlined
-                      dense
-                      clearable
-                      @update:model-value="resetAndFetchLogs"
-                    ></v-select>
-                  </v-col>
-                </v-row>
-                
-                <v-row>
-                  <v-col cols="auto">
-                    <v-btn
-                      color="secondary"
-                      variant="outlined"
-                      @click="clearFilters"
-                      size="small"
-                    >
-                      <v-icon left>mdi-filter-remove</v-icon>
-                      Clear Filters
-                    </v-btn>
-                  </v-col>
-                </v-row>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-          </v-expansion-panels>
-        </v-card-text>
-        
-        <v-card-text class="pa-6 pt-0" style="max-height: 70vh; overflow-y: auto;">
-          <v-progress-linear v-if="logsLoading" indeterminate class="mb-4"></v-progress-linear>
-          
-          <v-expansion-panels v-if="logs.length > 0" multiple class="logs-expansion-panels">
-            <v-expansion-panel v-for="log in logs" :key="log.id" class="mb-3">
-              <v-expansion-panel-title class="pa-4">
-                <div class="d-flex align-center w-100">
-                  <v-chip 
-                    :color="log.status_code >= 200 && log.status_code < 300 ? 'success' : 'error'"
-                    size="small"
-                    class="mr-4"
-                  >
-                    {{ log.status_code }}
-                  </v-chip>
-                  
-                  <span class="mr-4 font-weight-medium">{{ log.response_time_ms }}ms</span>
-                  
-                  <v-chip 
-                    variant="outlined" 
-                    size="small"
-                    class="mr-4"
-                  >
-                    {{ formatDate(log.checked_at) }}
-                  </v-chip>
-                  
-                  <span v-if="log.error_message" class="text-error text-truncate flex-grow-1">
-                    {{ log.error_message }}
-                  </span>
-                </div>
-              </v-expansion-panel-title>
-              
-              <v-expansion-panel-text class="pa-6">
-                <v-row class="mb-4">
-                  <v-col cols="12" md="6">
-                    <h4 class="mb-4">Response Headers</h4>
-                    <v-sheet 
-                        v-if="log.response_headers && log.response_headers.trim()" 
-                        color="blue-grey-lighten-5"
-                        class="pa-4 rounded"
-                        style="max-height: 400px; overflow-y: auto;"
-                    >
-                        <div 
-                        v-for="(value, key) in parseHeaders(log.response_headers)" 
-                        :key="key"
-                        class="text-body-2 mb-2 font-weight-medium"
-                        style="font-family: 'Courier New', monospace; line-height: 1.6;"
-                        >
-                        <span class="font-weight-bold text-indigo-darken-2">{{ key }}:</span> 
-                        <span class="text-grey-darken-4 font-weight-medium ml-2">{{ value }}</span>
-                        </div>
-                    </v-sheet>
-                    <v-alert v-else type="info" variant="outlined">No headers available</v-alert>
-                  </v-col>
-                  
-                  <v-col cols="12" md="6">
-                    <h4 class="mb-4">Response Body</h4>
-                    <v-sheet 
-                      v-if="log.response_body && log.response_body.trim()" 
-                      color="grey-darken-4"
-                      class="pa-4 rounded"
-                      style="max-height: 400px; overflow-y: auto;"
-                    >
-                      <pre class="text-green-lighten-2 text-body-2 font-weight-medium" style="font-family: 'Courier New', monospace; white-space: pre-wrap; word-break: break-word; line-height: 1.6; margin: 0;">{{ formatResponseBody(log.response_body) }}</pre>
-                    </v-sheet>
-                    <v-alert v-else type="info" variant="outlined">No response body</v-alert>
-                  </v-col>
-                </v-row>
-                
-                <!-- Debug info -->
-                <v-row class="mt-6">
-                  <v-col cols="12">
-                    <details>
-                      <summary class="mb-2 text-subtitle-2 cursor-pointer">Debug Info</summary>
-                      <v-sheet color="grey-lighten-4" class="pa-3 rounded">
-                        <pre class="text-caption">{{ JSON.stringify(log, null, 2) }}</pre>
-                      </v-sheet>
-                    </details>
-                  </v-col>
-                </v-row>
-              </v-expansion-panel-text>
-            </v-expansion-panel>
-          </v-expansion-panels>
-          
-          <v-alert v-else-if="!logsLoading" type="info" class="ma-4">
-            No logs available for this endpoint
-          </v-alert>
-        </v-card-text>
-        
-        <!-- Pagination Controls -->
-        <v-card-text v-if="logs.length > 0" class="pa-6 pt-4">
-          <v-row align="center" justify="space-between">
-            <v-col cols="auto">
-              <v-select
-                v-model="logsPerPage"
-                :items="[10, 25, 50, 100]"
-                label="Items per page"
-                density="compact"
-                style="width: 140px;"
-                @update:model-value="resetAndFetchLogs"
-              ></v-select>
-            </v-col>
-            
-            <v-col cols="auto">
-              <span class="text-body-2">
-                Showing {{ logs.length }} of {{ totalLogs }} logs
-              </span>
-            </v-col>
-            
-            <v-col cols="auto">
-              <v-btn
-                v-if="hasMoreLogs"
-                color="primary"
-                @click="loadMoreLogs"
-                :loading="loadingMore"
-                size="large"
-              >
-                <v-icon left>mdi-plus</v-icon>
-                Load More
-              </v-btn>
-              <span v-else class="text-body-2 text-grey">
-                All logs loaded
-              </span>
-            </v-col>
-          </v-row>
-        </v-card-text>
-      </v-card>
-    </v-dialog>
+    <EndpointLogsModal
+      v-model:dialog="logsDialog"
+      :endpoint="selectedEndpoint"
+      :logs="logs"
+      :logs-loading="logsLoading"
+      :loading-more="loadingMore"
+      :total-logs="totalLogs"
+      :logs-per-page="logsPerPage"
+      :filters="filters"
+      @refresh="resetAndFetchLogs"
+      @filter-change="handleFilterChange"
+      @load-more="loadMoreLogs"
+      @logs-per-page-change="handleLogsPerPageChange"
+      @clear-filters="clearFilters"
+      @close="handleCloseLogsModal"
+    />
 
     <!-- Snackbar for notifications -->
     <v-snackbar
@@ -579,11 +249,17 @@
 <script>
 import { endpointsAPI, proxiesAPI } from '@/services/api'
 import ResponseTimeChart from '@/components/ResponseTimeChart.vue'
+import EndpointFormModal from '@/components/EndpointFormModal.vue'
+import DeleteConfirmationModal from '@/components/DeleteConfirmationModal.vue'
+import EndpointLogsModal from '@/components/EndpointLogsModal.vue'
 
 export default {
   name: 'Dashboard',
   components: {
-    ResponseTimeChart
+    ResponseTimeChart,
+    EndpointFormModal,
+    DeleteConfirmationModal,
+    EndpointLogsModal
   },
   
   data() {
@@ -602,7 +278,6 @@ export default {
       totalLogs: 0,
       
       // Filters for logs
-      filtersExpanded: [],
       filters: {
         startDate: '',
         endDate: '',
@@ -619,7 +294,6 @@ export default {
       isEditMode: false,
       saving: false,
       deleting: false,
-      valid: false,
       
       // Snackbar
       snackbar: false,
@@ -643,24 +317,6 @@ export default {
         is_active: true,
         proxy_id: null
       },
-      
-      // Validation rules
-      nameRules: [
-        v => !!v || 'Name is required',
-        v => (v && v.length >= 3) || 'Name must be at least 3 characters',
-        v => (v && v.length <= 100) || 'Name must be less than 100 characters'
-      ],
-      urlRules: [
-        v => !!v || 'URL is required',
-        v => {
-          try {
-            new URL(v)
-            return true
-          } catch {
-            return 'Please enter a valid URL'
-          }
-        }
-      ],
       
       // Table headers
       endpointHeaders: [
@@ -722,18 +378,6 @@ export default {
     
     hasMoreLogs() {
       return this.logs.length < this.totalLogs
-    },
-    
-    statusCodeOptions() {
-      return [
-        { title: 'Success (2xx)', value: '2xx' },
-        { title: 'Redirect (3xx)', value: '3xx' },
-        { title: 'Client Error (4xx)', value: '4xx' },
-        { title: 'Server Error (5xx)', value: '5xx' },
-        { title: '200 OK', value: '200' },
-        { title: '404 Not Found', value: '404' },
-        { title: '500 Internal Server Error', value: '500' }
-      ]
     }
   },
   
@@ -823,22 +467,14 @@ export default {
       this.isEditMode = true
       this.dialog = true
     },
-    
-    async saveEndpoint() {
-      if (!this.valid) return
-      
+
+    // Modal event handlers
+    async handleSaveEndpoint(payload) {
       this.saving = true
-      
-      const payload = {
-        ...this.endpointForm,
-        method: this.endpointForm.method || 'GET',
-        headers: this.endpointForm.headers || {},
-        body: this.endpointForm.body || ''
-      }
       
       try {
         if (this.isEditMode) {
-          await endpointsAPI.update(this.endpointForm.id, payload)
+          await endpointsAPI.update(payload.id, payload)
           this.showSnackbar('Endpoint updated successfully', 'success')
         } else {
           await endpointsAPI.create(payload)
@@ -852,6 +488,58 @@ export default {
       } finally {
         this.saving = false
       }
+    },
+
+    handleCloseFormModal() {
+      this.dialog = false
+      this.resetForm()
+    },
+
+    async handleConfirmDelete(endpoint) {
+      this.deleting = true
+      
+      try {
+        await endpointsAPI.delete(endpoint.id)
+        this.showSnackbar('Endpoint deleted successfully', 'success')
+        this.deleteDialog = false
+        this.refreshData()
+      } catch (error) {
+        this.showSnackbar('Failed to delete endpoint', 'error')
+      } finally {
+        this.deleting = false
+      }
+    },
+
+    handleCloseDeleteModal() {
+      this.deleteDialog = false
+      this.deletingEndpoint = null
+    },
+
+    handleFilterChange(filters) {
+      this.filters = { ...filters }
+      this.resetAndFetchLogs()
+    },
+
+    handleLogsPerPageChange(newPerPage) {
+      this.logsPerPage = newPerPage
+      this.resetAndFetchLogs()
+    },
+
+    handleCloseLogsModal() {
+      this.logsDialog = false
+      this.selectedEndpoint = null
+      this.logs = []
+    },
+
+    // Legacy methods (keeping for backward compatibility)
+    async saveEndpoint() {
+      // This is now handled by handleSaveEndpoint
+      console.warn('saveEndpoint is deprecated, use handleSaveEndpoint instead')
+    },
+
+    async confirmDelete() {
+      // This is now handled by handleConfirmDelete  
+      console.warn('confirmDelete is deprecated, use handleConfirmDelete instead')
     },
     
     async toggleEndpoint(endpoint) {
@@ -878,21 +566,6 @@ export default {
     deleteEndpoint(endpoint) {
       this.deletingEndpoint = endpoint
       this.deleteDialog = true
-    },
-    
-    async confirmDelete() {
-      this.deleting = true
-      
-      try {
-        await endpointsAPI.delete(this.deletingEndpoint.id)
-        this.showSnackbar('Endpoint deleted successfully', 'success')
-        this.deleteDialog = false
-        this.refreshData()
-      } catch (error) {
-        this.showSnackbar('Failed to delete endpoint', 'error')
-      } finally {
-        this.deleting = false
-      }
     },
     
     resetForm() {
@@ -1002,28 +675,6 @@ export default {
       }
     },
     
-    parseHeaders(headersStr) {
-      try {
-        if (!headersStr || headersStr.trim() === '') return {}
-        return JSON.parse(headersStr)
-      } catch (e) {
-        return {}
-      }
-    },
-    
-    formatResponseBody(body) {
-      try {
-        const parsed = JSON.parse(body)
-        return JSON.stringify(parsed, null, 2)
-      } catch {
-        return body
-      }
-    },
-    
-    formatDate(dateStr) {
-      return new Date(dateStr).toLocaleString()
-    },
-    
     showSnackbar(text, color = 'success') {
       this.snackbarText = text
       this.snackbarColor = color
@@ -1044,65 +695,5 @@ export default {
 </script>
 
 <style scoped>
-/* Only keep essential overrides */
-.log-expansion-panel >>> .v-expansion-panel-text__wrapper {
-  padding: 16px;
-}
-
-/* Logs dialog improvements */
-.logs-dialog-card {
-  border-radius: 12px !important;
-  position: relative;
-  overflow: visible !important;
-}
-
-/* Close button positioning */
-.close-btn {
-  position: absolute !important;
-  top: 12px;
-  right: 12px;
-  z-index: 1000;
-  border: 3px solid #FFB300 !important;
-  background: linear-gradient(135deg, #FFD54F, #FF8F00) !important;
-  box-shadow: 0 4px 12px rgba(255, 179, 0, 0.4) !important;
-  border-radius: 50% !important;
-  width: 48px !important;
-  height: 48px !important;
-}
-
-.close-btn:hover {
-  background: linear-gradient(135deg, #FFE082, #FFA000) !important;
-  transform: scale(1.1);
-  transition: all 0.2s ease;
-  box-shadow: 0 6px 16px rgba(255, 179, 0, 0.6) !important;
-}
-
-.logs-expansion-panels .v-expansion-panel {
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: 8px !important;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.logs-expansion-panels .v-expansion-panel:not(:last-child) {
-  margin-bottom: 16px;
-}
-
-.logs-expansion-panels .v-expansion-panel-title {
-  border-radius: 8px 8px 0 0 !important;
-}
-
-.logs-expansion-panels .v-expansion-panel--active .v-expansion-panel-title {
-  border-radius: 8px 8px 0 0 !important;
-}
-
-.cursor-pointer {
-  cursor: pointer;
-}
-
-/* Responsive improvements */
-@media (max-width: 960px) {
-  .logs-dialog-card .v-card-text {
-    max-height: 60vh !important;
-  }
-}
+/* Dashboard specific styles */
 </style>
