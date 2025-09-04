@@ -219,12 +219,10 @@
       :logs-loading="logsLoading"
       :loading-more="loadingMore"
       :total-logs="totalLogs"
-      :logs-per-page="logsPerPage"
       :filters="filters"
       @refresh="resetAndFetchLogs"
       @filter-change="handleFilterChange"
       @load-more="loadMoreLogs"
-      @logs-per-page-change="handleLogsPerPageChange"
       @clear-filters="clearFilters"
       @close="handleCloseLogsModal"
     />
@@ -517,11 +515,6 @@ export default {
 
     handleFilterChange(filters) {
       this.filters = { ...filters }
-      this.resetAndFetchLogs()
-    },
-
-    handleLogsPerPageChange(newPerPage) {
-      this.logsPerPage = newPerPage
       this.resetAndFetchLogs()
     },
 

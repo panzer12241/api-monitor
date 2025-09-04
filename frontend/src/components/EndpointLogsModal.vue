@@ -104,7 +104,12 @@
         </v-expansion-panels>
       </v-card-text>
       
-      <v-card-text class="pa-6 pt-0" style="max-height: 70vh; overflow-y: auto;">
+      <v-card-text 
+        ref="logsContainer"
+        class="pa-6 pt-0 logs-container" 
+        style="max-height: 70vh; overflow-y: auto;"
+        @scroll="handleScroll"
+      >
         <v-progress-linear v-if="logsLoading" indeterminate class="mb-4"></v-progress-linear>
         
         <v-expansion-panels v-if="logs.length > 0" multiple class="logs-expansion-panels">
@@ -187,47 +192,23 @@
           </v-expansion-panel>
         </v-expansion-panels>
         
-        <v-alert v-else-if="!logsLoading" type="info" class="ma-4">
+        <!-- Loading indicator for infinite scroll -->
+        <div v-if="loadingMore" class="d-flex justify-center pa-4">
+          <v-progress-circular indeterminate color="primary"></v-progress-circular>
+          <span class="ml-2">Loading more logs...</span>
+        </div>
+        
+        <!-- End of logs indicator -->
+        <div v-else-if="logs.length > 0 && !hasMoreLogs" class="d-flex justify-center pa-4">
+          <v-chip color="grey" variant="outlined">
+            <v-icon left>mdi-check</v-icon>
+            All logs loaded ({{ logs.length }} total)
+          </v-chip>
+        </div>
+        
+        <v-alert v-else-if="!logsLoading && logs.length === 0" type="info" class="ma-4">
           No logs available for this endpoint
         </v-alert>
-      </v-card-text>
-      
-      <!-- Pagination Controls -->
-      <v-card-text v-if="logs.length > 0" class="pa-6 pt-4">
-        <v-row align="center" justify="space-between">
-          <v-col cols="auto">
-            <v-select
-              v-model="localLogsPerPage"
-              :items="[10, 25, 50, 100]"
-              label="Items per page"
-              density="compact"
-              style="width: 140px;"
-              @update:model-value="onLogsPerPageChange"
-            ></v-select>
-          </v-col>
-          
-          <v-col cols="auto">
-            <span class="text-body-2">
-              Showing {{ logs.length }} of {{ totalLogs }} logs
-            </span>
-          </v-col>
-          
-          <v-col cols="auto">
-            <v-btn
-              v-if="hasMoreLogs"
-              color="primary"
-              @click="loadMore"
-              :loading="loadingMore"
-              size="large"
-            >
-              <v-icon left>mdi-plus</v-icon>
-              Load More
-            </v-btn>
-            <span v-else class="text-body-2 text-grey">
-              All logs loaded
-            </span>
-          </v-col>
-        </v-row>
       </v-card-text>
     </v-card>
   </v-dialog>
@@ -262,10 +243,6 @@ export default {
       type: Number,
       default: 0
     },
-    logsPerPage: {
-      type: Number,
-      default: 25
-    },
     filters: {
       type: Object,
       default: () => ({
@@ -277,13 +254,13 @@ export default {
     }
   },
   
-  emits: ['update:dialog', 'close', 'refresh', 'filter-change', 'load-more', 'logs-per-page-change', 'clear-filters'],
+  emits: ['update:dialog', 'close', 'refresh', 'filter-change', 'load-more', 'clear-filters'],
   
   data() {
     return {
       filtersExpanded: [],
       localFilters: { ...this.filters },
-      localLogsPerPage: this.logsPerPage,
+      isScrollLoading: false, // Prevent multiple simultaneous load requests
       
       statusCodeOptions: [
         { title: 'Success (2xx)', value: '2xx' },
@@ -319,14 +296,25 @@ export default {
       },
       deep: true,
       immediate: true
-    },
-    
-    logsPerPage(newValue) {
-      this.localLogsPerPage = newValue
     }
   },
   
   methods: {
+    handleScroll(event) {
+      const container = event.target
+      const scrollTop = container.scrollTop
+      const scrollHeight = container.scrollHeight
+      const clientHeight = container.clientHeight
+      
+      // Check if scrolled to near bottom (within 100px)
+      const nearBottom = scrollTop + clientHeight >= scrollHeight - 100
+      
+      if (nearBottom && this.hasMoreLogs && !this.loadingMore && !this.isScrollLoading) {
+        this.isScrollLoading = true
+        this.loadMore()
+      }
+    },
+    
     formatDate(dateString) {
       if (!dateString) return 'N/A'
       
@@ -408,10 +396,10 @@ export default {
     
     loadMore() {
       this.$emit('load-more')
-    },
-    
-    onLogsPerPageChange() {
-      this.$emit('logs-per-page-change', this.localLogsPerPage)
+      // Reset scroll loading flag after a short delay
+      setTimeout(() => {
+        this.isScrollLoading = false
+      }, 1000)
     },
     
     closeDialog() {
@@ -434,9 +422,12 @@ export default {
   z-index: 1;
 }
 
+.logs-container {
+  scroll-behavior: smooth;
+}
+
 .logs-expansion-panels {
   max-height: calc(70vh - 100px);
-  overflow-y: auto;
 }
 
 .cursor-pointer {
