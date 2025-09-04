@@ -326,9 +326,9 @@
     </v-dialog>
 
     <!-- Logs Dialog -->
-    <v-dialog v-model="logsDialog" max-width="1200px">
-      <v-card>
-        <v-card-title>
+    <v-dialog v-model="logsDialog" max-width="1400px" fullscreen-mobile>
+      <v-card class="logs-dialog-card">
+        <v-card-title class="pa-6 pb-4 position-relative">
           <v-icon left>mdi-history</v-icon>
           Endpoint Logs: {{ selectedEndpoint?.name || selectedEndpoint?.url }}
           <v-spacer></v-spacer>
@@ -337,22 +337,35 @@
             @click="fetchLogs" 
             :loading="logsLoading"
             size="small"
+            class="mr-2"
           >
             <v-icon left>mdi-refresh</v-icon>
             Refresh
           </v-btn>
+          
+          <!-- Close button in top right corner -->
+          <v-btn
+            icon
+            @click="logsDialog = false"
+            class="close-btn"
+            size="large"
+            color="amber"
+            variant="elevated"
+          >
+            <v-icon size="24" color="black">mdi-close</v-icon>
+          </v-btn>
         </v-card-title>
         
         <!-- Filters Section -->
-        <v-card-text class="pb-0">
-          <v-expansion-panels v-model="filtersExpanded">
+        <v-card-text class="pa-6 pt-0">
+          <v-expansion-panels v-model="filtersExpanded" class="mb-4">
             <v-expansion-panel>
-              <v-expansion-panel-title>
+              <v-expansion-panel-title class="pa-4">
                 <v-icon left>mdi-filter</v-icon>
                 Advanced Filters
               </v-expansion-panel-title>
-              <v-expansion-panel-text>
-                <v-row>
+              <v-expansion-panel-text class="pa-4">
+                <v-row class="mb-4">
                   <v-col cols="12" md="3">
                     <v-text-field
                       v-model="filters.startDate"
@@ -360,7 +373,7 @@
                       type="datetime-local"
                       outlined
                       dense
-                      @update:model-value="fetchLogs"
+                      @update:model-value="resetAndFetchLogs"
                     ></v-text-field>
                   </v-col>
                   
@@ -371,7 +384,7 @@
                       type="datetime-local"
                       outlined
                       dense
-                      @update:model-value="fetchLogs"
+                      @update:model-value="resetAndFetchLogs"
                     ></v-text-field>
                   </v-col>
                   
@@ -383,7 +396,7 @@
                       outlined
                       dense
                       placeholder="e.g. 1000"
-                      @update:model-value="fetchLogs"
+                      @update:model-value="resetAndFetchLogs"
                     ></v-text-field>
                   </v-col>
                   
@@ -395,7 +408,7 @@
                       outlined
                       dense
                       clearable
-                      @update:model-value="fetchLogs"
+                      @update:model-value="resetAndFetchLogs"
                     ></v-select>
                   </v-col>
                 </v-row>
@@ -418,80 +431,82 @@
           </v-expansion-panels>
         </v-card-text>
         
-        <v-card-text style="max-height: 600px; overflow-y: auto;">
-          <v-progress-linear v-if="logsLoading" indeterminate></v-progress-linear>
+        <v-card-text class="pa-6 pt-0" style="max-height: 70vh; overflow-y: auto;">
+          <v-progress-linear v-if="logsLoading" indeterminate class="mb-4"></v-progress-linear>
           
-          <v-expansion-panels v-if="logs.length > 0" multiple>
-            <v-expansion-panel v-for="log in logs" :key="log.id">
-              <v-expansion-panel-title>
-                <div class="d-flex align-center">
+          <v-expansion-panels v-if="logs.length > 0" multiple class="logs-expansion-panels">
+            <v-expansion-panel v-for="log in logs" :key="log.id" class="mb-3">
+              <v-expansion-panel-title class="pa-4">
+                <div class="d-flex align-center w-100">
                   <v-chip 
                     :color="log.status_code >= 200 && log.status_code < 300 ? 'success' : 'error'"
                     size="small"
-                    class="mr-3"
+                    class="mr-4"
                   >
                     {{ log.status_code }}
                   </v-chip>
                   
-                  <span class="mr-3">{{ log.response_time_ms }}ms</span>
+                  <span class="mr-4 font-weight-medium">{{ log.response_time_ms }}ms</span>
                   
                   <v-chip 
                     variant="outlined" 
                     size="small"
-                    class="mr-3"
+                    class="mr-4"
                   >
                     {{ formatDate(log.checked_at) }}
                   </v-chip>
                   
-                  <span v-if="log.error_message" class="text-error">
+                  <span v-if="log.error_message" class="text-error text-truncate flex-grow-1">
                     {{ log.error_message }}
                   </span>
                 </div>
               </v-expansion-panel-title>
               
-              <v-expansion-panel-text>
-                <v-row>
+              <v-expansion-panel-text class="pa-6">
+                <v-row class="mb-4">
                   <v-col cols="12" md="6">
-                    <h4 class="mb-3">Response Headers</h4>
+                    <h4 class="mb-4">Response Headers</h4>
                     <v-sheet 
                         v-if="log.response_headers && log.response_headers.trim()" 
                         color="blue-grey-lighten-5"
-                        class="pa-3 rounded"
+                        class="pa-4 rounded"
                         style="max-height: 400px; overflow-y: auto;"
                     >
                         <div 
                         v-for="(value, key) in parseHeaders(log.response_headers)" 
                         :key="key"
-                        class="text-body-2 mb-1 font-weight-medium"
-                        style="font-family: 'Courier New', monospace; line-height: 1.5;"
+                        class="text-body-2 mb-2 font-weight-medium"
+                        style="font-family: 'Courier New', monospace; line-height: 1.6;"
                         >
                         <span class="font-weight-bold text-indigo-darken-2">{{ key }}:</span> 
-                        <span class="text-grey-darken-4 font-weight-medium">{{ value }}</span>
+                        <span class="text-grey-darken-4 font-weight-medium ml-2">{{ value }}</span>
                         </div>
                     </v-sheet>
                     <v-alert v-else type="info" variant="outlined">No headers available</v-alert>
                   </v-col>
                   
                   <v-col cols="12" md="6">
-                    <h4 class="mb-3">Response Body</h4>
+                    <h4 class="mb-4">Response Body</h4>
                     <v-sheet 
                       v-if="log.response_body && log.response_body.trim()" 
                       color="grey-darken-4"
-                      class="pa-3 rounded"
+                      class="pa-4 rounded"
                       style="max-height: 400px; overflow-y: auto;"
                     >
-                      <pre class="text-green-lighten-2 text-body-2 font-weight-medium" style="font-family: 'Courier New', monospace; white-space: pre-wrap; word-break: break-word; line-height: 1.5; margin: 0;">{{ formatResponseBody(log.response_body) }}</pre>
+                      <pre class="text-green-lighten-2 text-body-2 font-weight-medium" style="font-family: 'Courier New', monospace; white-space: pre-wrap; word-break: break-word; line-height: 1.6; margin: 0;">{{ formatResponseBody(log.response_body) }}</pre>
                     </v-sheet>
                     <v-alert v-else type="info" variant="outlined">No response body</v-alert>
                   </v-col>
                 </v-row>
                 
                 <!-- Debug info -->
-                <v-row class="mt-4">
+                <v-row class="mt-6">
                   <v-col cols="12">
                     <details>
-                      <summary>Debug Info</summary>
-                      <pre class="text-caption">{{ JSON.stringify(log, null, 2) }}</pre>
+                      <summary class="mb-2 text-subtitle-2 cursor-pointer">Debug Info</summary>
+                      <v-sheet color="grey-lighten-4" class="pa-3 rounded">
+                        <pre class="text-caption">{{ JSON.stringify(log, null, 2) }}</pre>
+                      </v-sheet>
                     </details>
                   </v-col>
                 </v-row>
@@ -499,13 +514,13 @@
             </v-expansion-panel>
           </v-expansion-panels>
           
-          <v-alert v-else-if="!logsLoading" type="info">
+          <v-alert v-else-if="!logsLoading" type="info" class="ma-4">
             No logs available for this endpoint
           </v-alert>
         </v-card-text>
         
         <!-- Pagination Controls -->
-        <v-card-text v-if="logs.length > 0" class="pt-0">
+        <v-card-text v-if="logs.length > 0" class="pa-6 pt-4">
           <v-row align="center" justify="space-between">
             <v-col cols="auto">
               <v-select
@@ -513,33 +528,34 @@
                 :items="[10, 25, 50, 100]"
                 label="Items per page"
                 density="compact"
-                style="width: 120px;"
-                @update:model-value="fetchLogs"
+                style="width: 140px;"
+                @update:model-value="resetAndFetchLogs"
               ></v-select>
             </v-col>
             
             <v-col cols="auto">
               <span class="text-body-2">
-                Showing {{ ((currentPage - 1) * logsPerPage) + 1 }} - 
-                {{ Math.min(currentPage * logsPerPage, totalLogs) }} of {{ totalLogs }}
+                Showing {{ logs.length }} of {{ totalLogs }} logs
               </span>
             </v-col>
             
             <v-col cols="auto">
-              <v-pagination
-                v-model="currentPage"
-                :length="totalPages"
-                :total-visible="5"
-                @update:model-value="fetchLogs"
-              ></v-pagination>
+              <v-btn
+                v-if="hasMoreLogs"
+                color="primary"
+                @click="loadMoreLogs"
+                :loading="loadingMore"
+                size="large"
+              >
+                <v-icon left>mdi-plus</v-icon>
+                Load More
+              </v-btn>
+              <span v-else class="text-body-2 text-grey">
+                All logs loaded
+              </span>
             </v-col>
           </v-row>
         </v-card-text>
-        
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <v-btn @click="logsDialog = false">Close</v-btn>
-        </v-card-actions>
       </v-card>
     </v-dialog>
 
@@ -577,6 +593,7 @@ export default {
       logs: [],
       loading: false,
       logsLoading: false,
+      loadingMore: false,
       chartLoading: false,
       
       // Pagination for logs
@@ -701,6 +718,10 @@ export default {
     
     totalPages() {
       return Math.ceil(this.totalLogs / this.logsPerPage)
+    },
+    
+    hasMoreLogs() {
+      return this.logs.length < this.totalLogs
     },
     
     statusCodeOptions() {
@@ -898,12 +919,17 @@ export default {
       this.fetchLogs()
     },
     
-    async fetchLogs() {
+    async fetchLogs(append = false) {
       if (!this.selectedEndpoint) return
       
-      this.logsLoading = true
+      if (!append) {
+        this.logsLoading = true
+      } else {
+        this.loadingMore = true
+      }
+      
       try {
-        const offset = (this.currentPage - 1) * this.logsPerPage
+        const offset = append ? this.logs.length : 0
         const params = {
           limit: this.logsPerPage,
           offset: offset
@@ -926,19 +952,40 @@ export default {
         const response = await endpointsAPI.getLogs(this.selectedEndpoint.id, params)
         
         if (response.data) {
-          this.logs = response.data.logs || []
+          const newLogs = response.data.logs || []
+          
+          if (append) {
+            this.logs = [...this.logs, ...newLogs]
+          } else {
+            this.logs = newLogs
+          }
+          
           this.totalLogs = response.data.total || 0
         } else {
-          this.logs = []
-          this.totalLogs = 0
+          if (!append) {
+            this.logs = []
+            this.totalLogs = 0
+          }
         }
       } catch (error) {
         this.showSnackbar('Failed to fetch logs', 'error')
-        this.logs = []
-        this.totalLogs = 0
+        if (!append) {
+          this.logs = []
+          this.totalLogs = 0
+        }
       } finally {
         this.logsLoading = false
+        this.loadingMore = false
       }
+    },
+    
+    async loadMoreLogs() {
+      await this.fetchLogs(true)
+    },
+    
+    async resetAndFetchLogs() {
+      this.logs = []
+      await this.fetchLogs(false)
     },
     
     clearFilters() {
@@ -950,7 +997,7 @@ export default {
       }
       this.currentPage = 1
       if (this.selectedEndpoint) {
-        this.fetchLogs()
+        this.resetAndFetchLogs()
       }
     },
     
@@ -999,5 +1046,62 @@ export default {
 /* Only keep essential overrides */
 .log-expansion-panel >>> .v-expansion-panel-text__wrapper {
   padding: 16px;
+}
+
+/* Logs dialog improvements */
+.logs-dialog-card {
+  border-radius: 12px !important;
+  position: relative;
+  overflow: visible !important;
+}
+
+/* Close button positioning */
+.close-btn {
+  position: absolute !important;
+  top: 12px;
+  right: 12px;
+  z-index: 1000;
+  border: 3px solid #FFB300 !important;
+  background: linear-gradient(135deg, #FFD54F, #FF8F00) !important;
+  box-shadow: 0 4px 12px rgba(255, 179, 0, 0.4) !important;
+  border-radius: 50% !important;
+  width: 48px !important;
+  height: 48px !important;
+}
+
+.close-btn:hover {
+  background: linear-gradient(135deg, #FFE082, #FFA000) !important;
+  transform: scale(1.1);
+  transition: all 0.2s ease;
+  box-shadow: 0 6px 16px rgba(255, 179, 0, 0.6) !important;
+}
+
+.logs-expansion-panels .v-expansion-panel {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.logs-expansion-panels .v-expansion-panel:not(:last-child) {
+  margin-bottom: 16px;
+}
+
+.logs-expansion-panels .v-expansion-panel-title {
+  border-radius: 8px 8px 0 0 !important;
+}
+
+.logs-expansion-panels .v-expansion-panel--active .v-expansion-panel-title {
+  border-radius: 8px 8px 0 0 !important;
+}
+
+.cursor-pointer {
+  cursor: pointer;
+}
+
+/* Responsive improvements */
+@media (max-width: 960px) {
+  .logs-dialog-card .v-card-text {
+    max-height: 60vh !important;
+  }
 }
 </style>
