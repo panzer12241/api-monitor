@@ -19,7 +19,7 @@
           <v-card-text>
             <v-data-table
               :headers="headers"
-              :items="proxies"
+              :items="proxiesData"
               :loading="loading"
               class="elevation-1"
               no-data-text="No proxies configured"
@@ -48,6 +48,10 @@
                   {{ item.username }}
                 </v-chip>
                 <span v-else class="text-grey">No Auth</span>
+              </template>
+
+              <template v-slot:item.created_at="{ item }">
+                {{ formatDate(item.created_at) }}
               </template>
 
               <template v-slot:item.actions="{ item }">
@@ -211,7 +215,7 @@ export default {
   
   data() {
     return {
-      proxies: [],
+      proxies: [], // Ensure it's always an array
       loading: false,
       saving: false,
       deleting: false,
@@ -249,6 +253,12 @@ export default {
     }
   },
   
+  computed: {
+    proxiesData() {
+      return Array.isArray(this.proxies) ? this.proxies : []
+    }
+  },
+  
   mounted() {
     this.fetchProxies()
   },
@@ -258,10 +268,32 @@ export default {
       this.loading = true
       try {
         const response = await proxiesAPI.getAll()
-        this.proxies = response.data || []
+        
+        // Axios response structure: response.data contains the actual data
+        let proxiesData = []
+        
+        if (response && response.data) {
+          // Check if response.data has a 'data' property (our API structure)
+          if (response.data.data && Array.isArray(response.data.data)) {
+            proxiesData = response.data.data
+          } else if (Array.isArray(response.data)) {
+            proxiesData = response.data
+          }
+        }
+        
+        this.proxies = proxiesData
+        
+        if (this.proxies.length === 0) {
+          this.showSnackbar('No proxies found', 'info')
+        }
       } catch (error) {
-        this.showSnackbar('Failed to fetch proxies', 'error')
-        console.error(error)
+        this.proxies = [] // Ensure it's always an array
+        
+        if (error.response) {
+          this.showSnackbar(error.response.data?.error || 'Failed to fetch proxies', 'error')
+        } else {
+          this.showSnackbar('Network error: Unable to connect to server', 'error')
+        }
       } finally {
         this.loading = false
       }
@@ -313,7 +345,6 @@ export default {
         this.fetchProxies()
       } catch (error) {
         this.showSnackbar(error.response?.data?.error || 'Failed to save proxy', 'error')
-        console.error(error)
       } finally {
         this.saving = false
       }
@@ -333,7 +364,6 @@ export default {
         this.fetchProxies()
       } catch (error) {
         this.showSnackbar(error.response?.data?.error || 'Failed to delete proxy', 'error')
-        console.error(error)
       } finally {
         this.deleting = false
       }
@@ -348,7 +378,6 @@ export default {
         this.fetchProxies()
       } catch (error) {
         this.showSnackbar('Failed to toggle proxy status', 'error')
-        console.error(error)
       }
     },
     
@@ -356,6 +385,18 @@ export default {
       this.snackbarText = text
       this.snackbarColor = color
       this.snackbar = true
+    },
+
+    formatDate(dateString) {
+      if (!dateString) return '-'
+      const date = new Date(dateString)
+      return date.toLocaleDateString('en-GB', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
     }
   }
 }

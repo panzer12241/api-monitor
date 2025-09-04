@@ -21,6 +21,7 @@ func SetupRoutes(app *fiber.App, db *sql.DB, monitor *services.MonitorService) {
 	// Initialize controllers
 	authController := controllers.NewAuthController(db)
 	endpointController := controllers.NewEndpointController(db, monitor)
+	proxyController := controllers.NewProxyController(db)
 
 	// Public routes (no auth required)
 	auth := app.Group("/api/v1/auth")
@@ -46,11 +47,11 @@ func SetupRoutes(app *fiber.App, db *sql.DB, monitor *services.MonitorService) {
 		// api.Post("/cleanup-logs", endpointController.ManualCleanup)
 
 		// Proxy management
-		// api.Get("/proxies", proxyController.GetProxies)
-		// api.Post("/proxies", proxyController.CreateProxy)
-		// api.Put("/proxies/:id", proxyController.UpdateProxy)
-		// api.Delete("/proxies/:id", proxyController.DeleteProxy)
-		// api.Post("/proxies/:id/toggle", proxyController.ToggleProxy)
+		api.Get("/proxies", proxyController.GetProxies)
+		api.Post("/proxies", proxyController.CreateProxy)
+		api.Put("/proxies/:id", proxyController.UpdateProxy)
+		api.Delete("/proxies/:id", proxyController.DeleteProxy)
+		api.Post("/proxies/:id/toggle", proxyController.ToggleProxy)
 
 		// User management (admin only)
 		users := api.Group("/users", middleware.AdminMiddleware())
